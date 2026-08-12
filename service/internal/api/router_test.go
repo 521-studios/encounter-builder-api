@@ -8,7 +8,16 @@ import (
 	"time"
 
 	"github.com/521studios/encounter-builder-api/internal/auth"
+	"github.com/521studios/encounter-builder-api/internal/letsroll"
+	"github.com/521studios/encounter-builder-api/internal/store"
 )
+
+// testDeps builds the non-Auth Config fields the router requires. The campaign
+// routes are never reached without a token in these tests, so a store over a
+// nil client is fine.
+func testDeps() (*store.Store, *letsroll.Client) {
+	return store.New(nil, "test-table"), letsroll.New("http://127.0.0.1:1")
+}
 
 // TestRouter_ProtectedRoutesRequireToken guards the auth wiring structurally:
 // /healthz is public, every other route 401s without a bearer token. A route
@@ -26,7 +35,8 @@ func TestRouter_ProtectedRoutesRequireToken(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewVerifier: %v", err)
 	}
-	r := NewRouter(Config{Auth: v, Env: "test"})
+	st, lr := testDeps()
+	r := NewRouter(Config{Auth: v, Env: "test", Store: st, LetsRoll: lr})
 
 	cases := map[string]struct {
 		path string
