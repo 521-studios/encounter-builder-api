@@ -9,13 +9,17 @@ import (
 	"time"
 
 	"github.com/521studios/encounter-builder-api/internal/auth"
+	"github.com/521studios/encounter-builder-api/internal/letsroll"
+	"github.com/521studios/encounter-builder-api/internal/store"
 	"github.com/go-chi/chi/v5"
 )
 
 // Config injects the service's dependencies into the router.
 type Config struct {
-	Auth *auth.Verifier
-	Env  string
+	Auth     *auth.Verifier
+	Env      string
+	Store    *store.Store
+	LetsRoll *letsroll.Client
 }
 
 // NewRouter wires the routes. The same *chi.Mux is served by cmd/lambda (via the
@@ -25,6 +29,9 @@ func NewRouter(cfg Config) *chi.Mux {
 		// Fail fast at construction rather than nil-panic deep in the middleware
 		// on the first request — every protected route depends on it.
 		panic("api: NewRouter requires a non-nil Auth verifier")
+	}
+	if cfg.Store == nil || cfg.LetsRoll == nil {
+		panic("api: NewRouter requires a non-nil Store and LetsRoll client")
 	}
 	h := &handler{cfg: cfg}
 
@@ -38,6 +45,18 @@ func NewRouter(cfg Config) *chi.Mux {
 	r.Group(func(r chi.Router) {
 		r.Use(cfg.Auth.Middleware)
 		r.Get("/api/app/me", h.me)
+
+		// Encounters are campaign-scoped and GM-only: requireGM asks lets-roll
+		// (as the caller) whether they run this game before any handler runs.
+		r.Route("/api/app/campaigns/{campaignID}/encounters", func(r chi.Router) {
+			r.Use(h.requireGM)
+			r.Post("/", h.createEncounter)
+			r.Get("/", h.listEncounters)
+			r.Get("/{encounterID}", h.getEncounter)
+			r.Put("/{encounterID}", h.updateEncounter)
+			r.Delete("/{encounterID}", h.deleteEncounter)
+			r.Post("/{encounterID}/release", h.releaseEncounter)
+		})
 	})
 
 	return r

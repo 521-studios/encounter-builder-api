@@ -10,33 +10,21 @@ import (
 	"time"
 
 	"github.com/521studios/encounter-builder-api/internal/api"
-	"github.com/521studios/encounter-builder-api/internal/auth"
 )
 
 func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	verifier, err := auth.NewVerifier(ctx, auth.Config{
-		Issuer:   mustEnv("OIDC_ISSUER"),
-		Audience: os.Getenv("OIDC_AUDIENCE"),
-	})
+	cfg, err := api.BuildConfig(ctx, "local")
 	if err != nil {
-		log.Fatalf("auth init: %v", err)
+		log.Fatalf("startup: %v", err)
 	}
 
-	router := api.NewRouter(api.Config{Auth: verifier, Env: envOrDefault("ENV", "local")})
+	router := api.NewRouter(cfg)
 	port := envOrDefault("PORT", "8090")
 	log.Printf("encounter-builder-api listening on :%s", port)
 	log.Fatal(http.ListenAndServe(":"+port, router))
-}
-
-func mustEnv(key string) string {
-	v := os.Getenv(key)
-	if v == "" {
-		log.Fatalf("%s is required", key)
-	}
-	return v
 }
 
 func envOrDefault(key, def string) string {

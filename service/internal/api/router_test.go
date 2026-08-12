@@ -8,7 +8,16 @@ import (
 	"time"
 
 	"github.com/521studios/encounter-builder-api/internal/auth"
+	"github.com/521studios/encounter-builder-api/internal/letsroll"
+	"github.com/521studios/encounter-builder-api/internal/store"
 )
+
+// testDeps builds the non-Auth Config fields the router requires. The campaign
+// routes are never reached without a token in these tests, so a store over a
+// nil client is fine.
+func testDeps() (*store.Store, *letsroll.Client) {
+	return store.New(nil, "test-table"), letsroll.New("http://127.0.0.1:1")
+}
 
 // TestRouter_ProtectedRoutesRequireToken guards the auth wiring structurally:
 // /healthz is public, every other route 401s without a bearer token. A route
@@ -26,7 +35,8 @@ func TestRouter_ProtectedRoutesRequireToken(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewVerifier: %v", err)
 	}
-	r := NewRouter(Config{Auth: v, Env: "test"})
+	st, lr := testDeps()
+	r := NewRouter(Config{Auth: v, Env: "test", Store: st, LetsRoll: lr})
 
 	cases := map[string]struct {
 		path string
@@ -53,4 +63,31 @@ func TestNewRouter_PanicsWithoutVerifier(t *testing.T) {
 		}
 	}()
 	NewRouter(Config{Env: "test"})
+}
+
+// TestNewRouter_PanicsWithoutStoreOrLetsRoll: with Auth present, a nil Store or
+// LetsRoll is still a construction-time panic (the campaign handlers deref them).
+func TestNewRouter_PanicsWithoutStoreOrLetsRoll(t *testing.T) {
+	v, err := auth.NewVerifier(context.Background(), auth.Config{
+		Issuer:  "https://issuer.test",
+		JWKSURL: "http://127.0.0.1:1/jwks",
+	})
+	if err != nil {
+		t.Fatalf("NewVerifier: %v", err)
+	}
+	st, lr := testDeps()
+	cases := map[string]Config{
+		"nil store":    {Auth: v, Env: "test", LetsRoll: lr},
+		"nil letsroll": {Auth: v, Env: "test", Store: st},
+	}
+	for name, cfg := range cases {
+		func() {
+			defer func() {
+				if recover() == nil {
+					t.Fatalf("%s: expected NewRouter to panic", name)
+				}
+			}()
+			NewRouter(cfg)
+		}()
+	}
 }

@@ -25,8 +25,9 @@ import (
 type ctxKey string
 
 const (
-	subjectKey ctxKey = "oidc.subject"
-	tokenKey   ctxKey = "oidc.token"
+	subjectKey  ctxKey = "oidc.subject"
+	tokenKey    ctxKey = "oidc.token"
+	rawTokenKey ctxKey = "oidc.raw"
 )
 
 // Config configures a Verifier.
@@ -167,6 +168,7 @@ func (v *Verifier) Middleware(next http.Handler) http.Handler {
 		}
 		ctx := context.WithValue(r.Context(), subjectKey, tok.Subject())
 		ctx = context.WithValue(ctx, tokenKey, tok)
+		ctx = WithRawToken(ctx, raw)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
@@ -196,4 +198,17 @@ func Subject(ctx context.Context) string {
 func Token(ctx context.Context) jwt.Token {
 	t, _ := ctx.Value(tokenKey).(jwt.Token)
 	return t
+}
+
+// RawToken returns the verified request's original bearer string, for
+// forwarding to lets-roll's /api/v1 on the user's behalf (campaign authZ).
+func RawToken(ctx context.Context) string {
+	s, _ := ctx.Value(rawTokenKey).(string)
+	return s
+}
+
+// WithRawToken seeds the bearer string the middleware sets. Exported so
+// downstream packages (and their tests) can construct an authorized context.
+func WithRawToken(ctx context.Context, raw string) context.Context {
+	return context.WithValue(ctx, rawTokenKey, raw)
 }
