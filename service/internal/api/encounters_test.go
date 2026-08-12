@@ -409,3 +409,19 @@ func TestDelete_IsNoContentAndRemoves(t *testing.T) {
 		t.Fatalf("get after delete = %d, want 404", rec.Code)
 	}
 }
+
+func TestTreasureVariant_RoundTrips(t *testing.T) {
+	h, _ := newHandler(t, true, 0)
+	router := campaignRoutes(h)
+	// A treasure line carrying a chosen item variant (by name).
+	body := `{"name":"loot","treasure":[{"qty":1,"ref":{"game_id":"Weapons:1"},"variant":"Striking (Greater)"}]}`
+	rec := do(t, router, http.MethodPost, encPath, body)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create = %d, want 201; body=%s", rec.Code, rec.Body)
+	}
+	var enc model.Encounter
+	_ = json.Unmarshal(rec.Body.Bytes(), &enc)
+	if len(enc.Treasure) != 1 || enc.Treasure[0].Variant != "Striking (Greater)" {
+		t.Fatalf("treasure variant not preserved: %+v", enc.Treasure)
+	}
+}
