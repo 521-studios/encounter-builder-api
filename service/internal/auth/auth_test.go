@@ -186,6 +186,31 @@ func TestMiddleware_PropagatesRawToken(t *testing.T) {
 	}
 }
 
+// TestMiddleware_AcceptsForwardedBearerHeader proves the X-Access-Token
+// fallback: behind CloudFront OAC the bearer arrives here (Authorization is
+// consumed by SigV4), and the middleware must still authenticate.
+func TestMiddleware_AcceptsForwardedBearerHeader(t *testing.T) {
+	tp := newTestProvider(t)
+	defer tp.close()
+	v := tp.verifier(t)
+
+	protected := v.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(Subject(r.Context())))
+	}))
+
+	// No Authorization header — token only in X-Access-Token (raw JWT).
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set("X-Access-Token", tp.mint(t, nil))
+	protected.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("forwarded bearer: status = %d, want 200", rec.Code)
+	}
+	if rec.Body.String() != "42" {
+		t.Fatalf("handler saw subject %q, want 42", rec.Body.String())
+	}
+}
+
 // TestMiddleware_RejectsInvalidToken guards the fail-open path: a present but
 // invalid token must 401 AND must not reach the handler. (Without this, a
 // regression that dropped the Verify-error early-return would go uncaught.)

@@ -179,6 +179,14 @@ func bearerToken(r *http.Request) string {
 	if len(h) > len(prefix) && strings.EqualFold(h[:len(prefix)], prefix) {
 		return strings.TrimSpace(h[len(prefix):])
 	}
+	// Fallback: behind CloudFront Lambda OAC the viewer's Authorization header is
+	// overwritten by the OAC SigV4 signature, so the bearer can't ride there. The
+	// SPA forwards the raw OIDC JWT in X-Access-Token, which the CloudFront
+	// origin-request-policy passes through untouched. The token is still fully
+	// verified downstream, so this is transport only — no trust in the header.
+	if t := strings.TrimSpace(r.Header.Get("X-Access-Token")); t != "" {
+		return t
+	}
 	return ""
 }
 

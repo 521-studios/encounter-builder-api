@@ -25,6 +25,12 @@ discovery from `OIDC_ISSUER`), caches it, and verifies RS256 signature + `iss`
 the request context (`auth.Subject(ctx)`). This is app-level authZ on top of the
 Function URL's AWS_IAM/CloudFront-OAC network gate.
 
+The bearer is read from `Authorization: Bearer <jwt>`, or, as a fallback, from
+`X-Access-Token` (raw JWT). The fallback exists because behind CloudFront Lambda
+OAC the viewer's `Authorization` header is overwritten by the OAC SigV4
+signature, so the SPA forwards the OIDC token in `X-Access-Token` (passed through
+by the CloudFront origin-request-policy). The JWT is fully verified either way.
+
 Env: `OIDC_ISSUER` (required), `OIDC_AUDIENCE` (the SPA client_id), `ENV`,
 `ENCOUNTERS_TABLE`.
 
