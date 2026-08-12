@@ -26,10 +26,12 @@ type ContentRef struct {
 	JSON          json.RawMessage   `json:"json,omitempty"`
 }
 
-// isEmpty reports whether a ref names nothing — no pristine game_id, no derived
-// base, and no custom json. Such a ref points at no content and is invalid.
+// isEmpty reports whether a ref names nothing — no pristine game_id, no custom
+// json, and no derived base that itself references content. A non-nil but empty
+// base ({"base":{}}) still points at nothing, so the check recurses.
 func (r ContentRef) isEmpty() bool {
-	return r.GameID == "" && r.Base == nil && len(r.Modifications) == 0 && len(r.JSON) == 0
+	baseEmpty := r.Base == nil || r.Base.isEmpty()
+	return r.GameID == "" && baseEmpty && len(r.Modifications) == 0 && len(r.JSON) == 0
 }
 
 // Adjustment is the PF2e elite/weak template applied to a monster (±1 level).

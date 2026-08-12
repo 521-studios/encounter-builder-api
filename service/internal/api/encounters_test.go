@@ -310,6 +310,7 @@ func TestHandlers_StoreErrorsAre500(t *testing.T) {
 		"create": {http.MethodPost, encPath, `{"name":"x"}`},
 		"list":   {http.MethodGet, encPath, ""},
 		"get":    {http.MethodGet, encPath + "/id1", ""},
+		"delete": {http.MethodDelete, encPath + "/id1", ""},
 	}
 	for name, tc := range cases {
 		if rec := do(t, router, tc.method, tc.path, tc.body); rec.Code != http.StatusInternalServerError {

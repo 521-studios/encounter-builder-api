@@ -190,6 +190,19 @@ func TestStore_ListPaginates(t *testing.T) {
 	}
 }
 
+func TestStore_ListEmptyIsNonNil(t *testing.T) {
+	got, err := New(newFake(), "t").List(context.Background(), "no-such-campaign")
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if got == nil {
+		t.Fatal("List returned nil for an empty campaign; must be non-nil so it encodes as [] not null")
+	}
+	if len(got) != 0 {
+		t.Fatalf("List len = %d, want 0", len(got))
+	}
+}
+
 func TestStore_Delete(t *testing.T) {
 	st := New(newFake(), "test-table")
 	ctx := context.Background()

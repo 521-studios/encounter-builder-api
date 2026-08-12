@@ -86,7 +86,7 @@ func (s *Store) Get(ctx context.Context, campaignID, id string) (model.Encounter
 // a single Query returns at most 1MB, so a campaign with many encounters spans
 // pages. Looping on LastEvaluatedKey is required to avoid silently truncating.
 func (s *Store) List(ctx context.Context, campaignID string) ([]model.Encounter, error) {
-	var encounters []model.Encounter
+	encounters := make([]model.Encounter, 0) // non-nil so an empty campaign encodes as [] not null
 	var startKey map[string]types.AttributeValue
 	for {
 		out, err := s.db.Query(ctx, &dynamodb.QueryInput{

@@ -18,6 +18,8 @@ func TestEncounterInput_Validate(t *testing.T) {
 		"bad adjustment":    {EncounterInput{Name: "x", Monsters: []MonsterEntry{{Ref: pristine, Count: 1, Adjustment: "huge"}}}, true},
 		"treasure no ref":   {EncounterInput{Name: "x", Treasure: []TreasureLine{{Qty: 1}}}, true},
 		"treasure qty 0":    {EncounterInput{Name: "x", Treasure: []TreasureLine{{Ref: pristine, Qty: 0}}}, true},
+		"bad sale_class":    {EncounterInput{Name: "x", Treasure: []TreasureLine{{Ref: pristine, Qty: 1, SaleClass: "junk"}}}, true},
+		"bad state":         {EncounterInput{Name: "x", Treasure: []TreasureLine{{Ref: pristine, Qty: 1, State: "vaporized"}}}, true},
 		"negative currency": {EncounterInput{Name: "x", Currency: Currency{GP: -1}}, true},
 	}
 	for name, tc := range cases {
@@ -47,8 +49,14 @@ func TestEncounterInput_ValidateNormalizesEnums(t *testing.T) {
 }
 
 func TestContentRef_isEmpty(t *testing.T) {
-	if !(ContentRef{}).isEmpty() {
-		t.Error("zero ref should be empty")
+	for _, r := range []ContentRef{
+		{},                                       // zero
+		{Base: &ContentRef{}},                    // non-nil but empty base points at nothing
+		{Base: &ContentRef{Base: &ContentRef{}}}, // recursively empty
+	} {
+		if !r.isEmpty() {
+			t.Errorf("%+v should be empty", r)
+		}
 	}
 	for _, r := range []ContentRef{
 		{GameID: "g"},
