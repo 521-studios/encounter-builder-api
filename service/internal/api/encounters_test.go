@@ -276,6 +276,57 @@ func TestDecodeBody_Rejects400(t *testing.T) {
 	}
 }
 
+// TestCreate_V2FieldsAndTemplatedMonster covers the v2 additions: chapter_id +
+// markdown description round-trip, and a *templated* monster stored as a derived
+// ContentRef ({base, modifications, json}) — which needs no new model field and
+// must pass validation via the recursive isEmpty (base references content).
+func TestCreate_V2FieldsAndTemplatedMonster(t *testing.T) {
+	h, _ := newHandler(t, true, 0)
+	router := campaignRoutes(h)
+
+	body := `{
+		"name":"Boss fight",
+		"chapter_id":"ch-abc",
+		"description":"# The Vault\n\nA **giant** guards the door.",
+		"monsters":[{
+			"count":1,
+			"adjustment":"elite",
+			"ref":{
+				"base":{"game_id":"Monsters:2382"},
+				"modifications":[{"template_game_id":"Templates:fire","selections":{"element":"fire"}}],
+				"json":{"name":"Fire-touched Giant (elite)"}
+			}
+		}]
+	}`
+	rec := do(t, router, http.MethodPost, encPath, body)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create = %d, want 201; body=%s", rec.Code, rec.Body)
+	}
+	var enc model.Encounter
+	_ = json.Unmarshal(rec.Body.Bytes(), &enc)
+	if enc.ChapterID != "ch-abc" || enc.Description == "" {
+		t.Fatalf("v2 fields not persisted: chapter=%q desc=%q", enc.ChapterID, enc.Description)
+	}
+	if len(enc.Monsters) != 1 || enc.Monsters[0].Ref.Base == nil || enc.Monsters[0].Ref.Base.GameID != "Monsters:2382" {
+		t.Fatalf("derived monster ref not round-tripped: %+v", enc.Monsters)
+	}
+	if len(enc.Monsters[0].Ref.Modifications) != 1 {
+		t.Fatalf("template modifications dropped: %+v", enc.Monsters[0].Ref)
+	}
+
+	// Update can move it to a different chapter and edit the description.
+	base := encPath + "/" + enc.ID
+	rec = do(t, router, http.MethodPut, base, `{"name":"Boss fight","chapter_id":"ch-xyz","description":"moved"}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("update = %d, want 200; body=%s", rec.Code, rec.Body)
+	}
+	var updated model.Encounter
+	_ = json.Unmarshal(rec.Body.Bytes(), &updated)
+	if updated.ChapterID != "ch-xyz" || updated.Description != "moved" {
+		t.Fatalf("v2 fields not updated: %+v", updated)
+	}
+}
+
 // errDynamo fails every operation, to exercise the handlers' 500 paths.
 type errDynamo struct{}
 

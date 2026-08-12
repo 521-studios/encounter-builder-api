@@ -63,16 +63,18 @@ func (h *handler) createEncounter(w http.ResponseWriter, r *http.Request) {
 	}
 	now := time.Now().UTC()
 	enc := model.Encounter{
-		ID:         newID(),
-		CampaignID: chi.URLParam(r, "campaignID"),
-		Name:       in.Name,
-		Status:     model.StatusDraft, // new encounters always start in draft
-		Notes:      in.Notes,
-		Monsters:   in.Monsters,
-		Treasure:   in.Treasure,
-		Currency:   in.Currency,
-		CreatedAt:  now,
-		UpdatedAt:  now,
+		ID:          newID(),
+		CampaignID:  chi.URLParam(r, "campaignID"),
+		Name:        in.Name,
+		Status:      model.StatusDraft, // new encounters always start in draft
+		ChapterID:   in.ChapterID,
+		Description: in.Description,
+		Notes:       in.Notes,
+		Monsters:    in.Monsters,
+		Treasure:    in.Treasure,
+		Currency:    in.Currency,
+		CreatedAt:   now,
+		UpdatedAt:   now,
 	}
 	if err := h.cfg.Store.Put(r.Context(), enc); err != nil {
 		writeJSON(w, http.StatusInternalServerError, errBody("could not save encounter"))
@@ -122,6 +124,8 @@ func (h *handler) updateEncounter(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	existing.Name = in.Name
+	existing.ChapterID = in.ChapterID
+	existing.Description = in.Description
 	existing.Notes = in.Notes
 	existing.Monsters = in.Monsters
 	existing.Treasure = in.Treasure

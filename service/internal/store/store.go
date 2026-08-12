@@ -216,10 +216,10 @@ func (s *Store) ListChapters(ctx context.Context, campaignID string) ([]model.Ch
 	return chapters, nil
 }
 
-// DeleteChapter removes a chapter (idempotent). Nothing references a chapter
-// yet (see model.Chapter), so there's no cascade. Once the encounter->chapter
-// link lands (bd_521Studios-sdmq), a deleted chapter's encounters are meant to
-// fall back to the "Unsorted" group rather than cascade-delete.
+// DeleteChapter removes a chapter (idempotent). No cascade: encounters that
+// reference it keep their now-dangling ChapterID and fall back to the "Unsorted"
+// group in the UI (the encounter->chapter link is soft by design), rather than
+// being deleted along with the chapter.
 func (s *Store) DeleteChapter(ctx context.Context, campaignID, id string) error {
 	_, err := s.db.DeleteItem(ctx, &dynamodb.DeleteItemInput{
 		TableName: aws.String(s.table),
