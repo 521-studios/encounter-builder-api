@@ -81,6 +81,10 @@ type TreasureLine struct {
 	SaleClass  SaleClass     `json:"sale_class,omitempty"`
 	State      TreasureState `json:"state,omitempty"`
 	StateNote  string        `json:"state_note,omitempty"`
+	// Variant is the chosen entry of an item's stat_block.variants, by NAME
+	// (e.g. "Striking (Greater)") — stable across data changes, unlike an index.
+	// Empty means the base item. Opaque to the API; the display library resolves it.
+	Variant string `json:"variant,omitempty"`
 }
 
 // Currency is the coin reward.
