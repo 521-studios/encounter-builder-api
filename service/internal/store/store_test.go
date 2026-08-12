@@ -135,6 +135,61 @@ func TestStore_ListScopedToCampaign(t *testing.T) {
 	}
 }
 
+// pagingDynamo returns items one-per-page with a LastEvaluatedKey until the
+// last, to exercise List's pagination loop.
+type pagingDynamo struct {
+	pages []map[string]types.AttributeValue
+	calls int
+}
+
+func (p *pagingDynamo) PutItem(context.Context, *dynamodb.PutItemInput, ...func(*dynamodb.Options)) (*dynamodb.PutItemOutput, error) {
+	return &dynamodb.PutItemOutput{}, nil
+}
+func (p *pagingDynamo) GetItem(context.Context, *dynamodb.GetItemInput, ...func(*dynamodb.Options)) (*dynamodb.GetItemOutput, error) {
+	return &dynamodb.GetItemOutput{}, nil
+}
+func (p *pagingDynamo) DeleteItem(context.Context, *dynamodb.DeleteItemInput, ...func(*dynamodb.Options)) (*dynamodb.DeleteItemOutput, error) {
+	return &dynamodb.DeleteItemOutput{}, nil
+}
+func (p *pagingDynamo) Query(_ context.Context, in *dynamodb.QueryInput, _ ...func(*dynamodb.Options)) (*dynamodb.QueryOutput, error) {
+	idx := 0
+	if in.ExclusiveStartKey != nil {
+		idx = int(in.ExclusiveStartKey["n"].(*types.AttributeValueMemberN).Value[0] - '0')
+	}
+	p.calls++
+	out := &dynamodb.QueryOutput{Items: []map[string]types.AttributeValue{p.pages[idx]}}
+	if idx+1 < len(p.pages) {
+		out.LastEvaluatedKey = map[string]types.AttributeValue{
+			"n": &types.AttributeValueMemberN{Value: string(rune('0' + idx + 1))},
+		}
+	}
+	return out, nil
+}
+
+func TestStore_ListPaginates(t *testing.T) {
+	mk := func(id string) map[string]types.AttributeValue {
+		e := sampleEncounter()
+		e.ID = id
+		payload, _ := json.Marshal(e)
+		return map[string]types.AttributeValue{
+			"pk":      &types.AttributeValueMemberS{Value: campaignPK(e.CampaignID)},
+			"sk":      &types.AttributeValueMemberS{Value: encounterSK(id)},
+			"payload": &types.AttributeValueMemberS{Value: string(payload)},
+		}
+	}
+	db := &pagingDynamo{pages: []map[string]types.AttributeValue{mk("a"), mk("b"), mk("c")}}
+	got, err := New(db, "t").List(context.Background(), "game-42")
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("List returned %d across pages, want 3", len(got))
+	}
+	if db.calls != 3 {
+		t.Fatalf("issued %d queries, want 3 (one per page)", db.calls)
+	}
+}
+
 func TestStore_Delete(t *testing.T) {
 	st := New(newFake(), "test-table")
 	ctx := context.Background()
