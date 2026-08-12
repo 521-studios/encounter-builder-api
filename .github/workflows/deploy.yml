@@ -1,0 +1,171 @@
+name: Deploy
+
+# Guarded continuous delivery: staging auto-applies on merge to main;
+# production is manual dispatch. Both refuse to apply a plan that
+# deletes/replaces a resource (e.g. the DynamoDB encounters table) unless
+# dispatched with confirm_destroy=true.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Environment to deploy"
+        required: true
+        type: choice
+        options: [staging, production]
+      confirm_destroy:
+        description: "Allow the apply to DESTROY/REPLACE resources (review the plan first)"
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  id-token: write # OIDC
+
+env:
+  GO_VERSION: "1.24"
+  TF_VERSION: "1.9.0"
+  AWS_REGION: "us-east-2"
+
+jobs:
+  deploy-staging:
+    name: Deploy — staging
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event.inputs.environment == 'staging')
+    concurrency:
+      group: deploy-staging
+      cancel-in-progress: false
+    env:
+      TF_STATE_BUCKET: 521studios-infra-tfstate-242288027927
+      OIDC_ISSUER: https://lets-roll.staging.521studios.com
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: service/go.sum
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN_STAGING }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: encounter-builder-api-deploy-staging
+      - name: Build Lambda bootstrap
+        working-directory: service
+        run: |
+          GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -ldflags="-s -w" -o bootstrap ./cmd/lambda
+          zip ../function.zip bootstrap
+      - uses: opentofu/setup-opentofu@v1
+        with:
+          tofu_version: ${{ env.TF_VERSION }}
+      - name: Terraform Init
+        working-directory: terraform
+        run: |
+          tofu init -input=false \
+            -backend-config="bucket=${TF_STATE_BUCKET}" \
+            -backend-config="key=encounter-builder-api/staging/terraform.tfstate"
+      - name: Terraform Plan
+        working-directory: terraform
+        run: |
+          set -o pipefail
+          tofu plan -input=false -no-color -out=tfplan \
+            -var="env=staging" -var="oidc_issuer=${OIDC_ISSUER}"
+      - name: Guard against unreviewed destroys
+        working-directory: terraform
+        run: |
+          set -euo pipefail
+          tofu show -json tfplan > tfplan.json
+          if ! destroys="$(jq '[.resource_changes[]? | select(.change.actions | index("delete"))] | length' tfplan.json)"; then
+            echo "::error::could not parse the plan — refusing to apply"; exit 1
+          fi
+          case "$destroys" in
+            '' | *[!0-9]*) echo "::error::unexpected destroy count '$destroys' — refusing to apply"; exit 1 ;;
+          esac
+          echo "Resources this plan would destroy or replace: $destroys"
+          if [ "$destroys" -gt 0 ] && [ "${{ github.event.inputs.confirm_destroy }}" != "true" ]; then
+            echo "::error::Plan destroys/replaces $destroys resource(s) — refusing to auto-apply. Review the plan, then re-dispatch with confirm_destroy=true if intended:"
+            jq -r '.resource_changes[]? | select(.change.actions | index("delete")) | "  \(.change.actions | join("+")): \(.address)"' tfplan.json
+            exit 1
+          fi
+      - name: Terraform Apply
+        working-directory: terraform
+        run: tofu apply -input=false tfplan
+      - name: Push new Lambda code
+        working-directory: terraform
+        run: |
+          FUNCTION=$(tofu output -raw lambda_function_name)
+          aws lambda update-function-code --function-name "$FUNCTION" \
+            --zip-file fileb://../function.zip --architectures arm64
+          aws lambda wait function-updated --function-name "$FUNCTION"
+
+  deploy-production:
+    name: Deploy — production
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && github.event.inputs.environment == 'production'
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
+    env:
+      TF_STATE_BUCKET: 521studios-infra-tfstate-242258465702
+      OIDC_ISSUER: https://lets-roll.521studios.com
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: service/go.sum
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN_PROD }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: encounter-builder-api-deploy-production
+      - name: Build Lambda bootstrap
+        working-directory: service
+        run: |
+          GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -ldflags="-s -w" -o bootstrap ./cmd/lambda
+          zip ../function.zip bootstrap
+      - uses: opentofu/setup-opentofu@v1
+        with:
+          tofu_version: ${{ env.TF_VERSION }}
+      - name: Terraform Init
+        working-directory: terraform
+        run: |
+          tofu init -input=false \
+            -backend-config="bucket=${TF_STATE_BUCKET}" \
+            -backend-config="key=encounter-builder-api/production/terraform.tfstate"
+      - name: Terraform Plan
+        working-directory: terraform
+        run: |
+          set -o pipefail
+          tofu plan -input=false -no-color -out=tfplan \
+            -var="env=production" -var="oidc_issuer=${OIDC_ISSUER}"
+      - name: Guard against unreviewed destroys
+        working-directory: terraform
+        run: |
+          set -euo pipefail
+          tofu show -json tfplan > tfplan.json
+          if ! destroys="$(jq '[.resource_changes[]? | select(.change.actions | index("delete"))] | length' tfplan.json)"; then
+            echo "::error::could not parse the plan — refusing to apply"; exit 1
+          fi
+          case "$destroys" in
+            '' | *[!0-9]*) echo "::error::unexpected destroy count '$destroys' — refusing to apply"; exit 1 ;;
+          esac
+          echo "Resources this plan would destroy or replace: $destroys"
+          if [ "$destroys" -gt 0 ] && [ "${{ github.event.inputs.confirm_destroy }}" != "true" ]; then
+            echo "::error::Plan destroys/replaces $destroys resource(s) — refusing to apply. Review the plan, then re-dispatch with confirm_destroy=true if intended:"
+            jq -r '.resource_changes[]? | select(.change.actions | index("delete")) | "  \(.change.actions | join("+")): \(.address)"' tfplan.json
+            exit 1
+          fi
+      - name: Terraform Apply
+        working-directory: terraform
+        run: tofu apply -input=false tfplan
+      - name: Push new Lambda code
+        working-directory: terraform
+        run: |
+          FUNCTION=$(tofu output -raw lambda_function_name)
+          aws lambda update-function-code --function-name "$FUNCTION" \
+            --zip-file fileb://../function.zip --architectures arm64
+          aws lambda wait function-updated --function-name "$FUNCTION"

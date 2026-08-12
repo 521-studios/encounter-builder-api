@@ -1,0 +1,5 @@
+# Local hot-reload dev container (Air rebuilds cmd/local on save).
+FROM golang:1.24-bookworm
+RUN go install github.com/air-verse/air@v1.61.5
+WORKDIR /app
+CMD ["air", "-c", ".air.toml"]
