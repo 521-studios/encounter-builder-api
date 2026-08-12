@@ -310,8 +310,25 @@ func TestCreate_V2FieldsAndTemplatedMonster(t *testing.T) {
 	if len(enc.Monsters) != 1 || enc.Monsters[0].Ref.Base == nil || enc.Monsters[0].Ref.Base.GameID != "Monsters:2382" {
 		t.Fatalf("derived monster ref not round-tripped: %+v", enc.Monsters)
 	}
-	if len(enc.Monsters[0].Ref.Modifications) != 1 {
-		t.Fatalf("template modifications dropped: %+v", enc.Monsters[0].Ref)
+	ref := enc.Monsters[0].Ref
+	// Assert the modification's *content* round-tripped, not just its presence —
+	// otherwise a serialization drop of template_game_id/selections would pass.
+	if len(ref.Modifications) != 1 {
+		t.Fatalf("template modifications dropped: %+v", ref)
+	}
+	var mod struct {
+		TemplateGameID string            `json:"template_game_id"`
+		Selections     map[string]string `json:"selections"`
+	}
+	if err := json.Unmarshal(ref.Modifications[0], &mod); err != nil {
+		t.Fatalf("modification is not the shape we stored: %v", err)
+	}
+	if mod.TemplateGameID != "Templates:fire" || mod.Selections["element"] != "fire" {
+		t.Fatalf("modification content not preserved: %+v", mod)
+	}
+	// And the resolved-creature snapshot (the display payload) survived.
+	if len(ref.JSON) == 0 || !strings.Contains(string(ref.JSON), "Fire-touched Giant") {
+		t.Fatalf("resolved json snapshot not preserved: %s", ref.JSON)
 	}
 
 	// Update can move it to a different chapter and edit the description.
