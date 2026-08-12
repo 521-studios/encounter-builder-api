@@ -1,0 +1,10 @@
+function.zip
+bootstrap
+service/tmp/
+*.db*
+.env
+.env.*
+terraform/.terraform/
+terraform/.terraform.lock.hcl
+terraform/tfplan
+.DS_Store
