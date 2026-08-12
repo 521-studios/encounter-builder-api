@@ -83,7 +83,7 @@ func gmServer(t *testing.T, amGM bool, statusCode int) *httptest.Server {
 			w.WriteHeader(statusCode)
 			return
 		}
-		_ = json.NewEncoder(w).Encode(letsroll.Game{ID: "g1", Name: "Camp", AmGM: amGM})
+		_ = json.NewEncoder(w).Encode(letsroll.Game{ID: 1, Name: "Camp", AmGM: amGM})
 	}))
 }
 

@@ -13,19 +13,24 @@ func TestFetchGame_ForwardsBearerAndParsesGM(t *testing.T) {
 		gotAuth = r.Header.Get("Authorization")
 		gotPath = r.URL.Path
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"id":"g1","name":"Rise of the Runelords","am_gm":true}`))
+		// lets-roll's /api/v1/games/:id serializes `id` as a NUMBER, not a string
+		// (Rails integer PK). The Game struct must decode it as such.
+		_, _ = w.Write([]byte(`{"id":3,"name":"Rise of the Runelords","gm_user_id":1,"am_gm":true}`))
 	}))
 	defer srv.Close()
 
-	g, err := New(srv.URL).FetchGame(context.Background(), "tok-abc", "g1")
+	g, err := New(srv.URL).FetchGame(context.Background(), "tok-abc", "3")
 	if err != nil {
 		t.Fatalf("FetchGame: %v", err)
 	}
 	if gotAuth != "Bearer tok-abc" {
 		t.Fatalf("Authorization = %q, want bearer forwarded", gotAuth)
 	}
-	if gotPath != "/api/v1/games/g1" {
+	if gotPath != "/api/v1/games/3" {
 		t.Fatalf("path = %q", gotPath)
+	}
+	if g.ID != 3 {
+		t.Fatalf("ID = %d, want 3 (numeric id decoded)", g.ID)
 	}
 	if !g.AmGM {
 		t.Fatalf("AmGM = false, want true")
