@@ -64,3 +64,30 @@ func TestNewRouter_PanicsWithoutVerifier(t *testing.T) {
 	}()
 	NewRouter(Config{Env: "test"})
 }
+
+// TestNewRouter_PanicsWithoutStoreOrLetsRoll: with Auth present, a nil Store or
+// LetsRoll is still a construction-time panic (the campaign handlers deref them).
+func TestNewRouter_PanicsWithoutStoreOrLetsRoll(t *testing.T) {
+	v, err := auth.NewVerifier(context.Background(), auth.Config{
+		Issuer:  "https://issuer.test",
+		JWKSURL: "http://127.0.0.1:1/jwks",
+	})
+	if err != nil {
+		t.Fatalf("NewVerifier: %v", err)
+	}
+	st, lr := testDeps()
+	cases := map[string]Config{
+		"nil store":    {Auth: v, Env: "test", LetsRoll: lr},
+		"nil letsroll": {Auth: v, Env: "test", Store: st},
+	}
+	for name, cfg := range cases {
+		func() {
+			defer func() {
+				if recover() == nil {
+					t.Fatalf("%s: expected NewRouter to panic", name)
+				}
+			}()
+			NewRouter(cfg)
+		}()
+	}
+}

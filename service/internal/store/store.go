@@ -82,28 +82,37 @@ func (s *Store) Get(ctx context.Context, campaignID, id string) (model.Encounter
 	return decode(out.Item)
 }
 
-// List returns all encounters for a campaign.
+// List returns all encounters for a campaign, following DynamoDB pagination —
+// a single Query returns at most 1MB, so a campaign with many encounters spans
+// pages. Looping on LastEvaluatedKey is required to avoid silently truncating.
 func (s *Store) List(ctx context.Context, campaignID string) ([]model.Encounter, error) {
-	out, err := s.db.Query(ctx, &dynamodb.QueryInput{
-		TableName:              aws.String(s.table),
-		KeyConditionExpression: aws.String("pk = :pk AND begins_with(sk, :sk)"),
-		ExpressionAttributeValues: map[string]types.AttributeValue{
-			":pk": &types.AttributeValueMemberS{Value: campaignPK(campaignID)},
-			":sk": &types.AttributeValueMemberS{Value: skPrefix},
-		},
-	})
-	if err != nil {
-		return nil, err
-	}
-	encounters := make([]model.Encounter, 0, len(out.Items))
-	for _, it := range out.Items {
-		enc, err := decode(it)
+	var encounters []model.Encounter
+	var startKey map[string]types.AttributeValue
+	for {
+		out, err := s.db.Query(ctx, &dynamodb.QueryInput{
+			TableName:              aws.String(s.table),
+			KeyConditionExpression: aws.String("pk = :pk AND begins_with(sk, :sk)"),
+			ExpressionAttributeValues: map[string]types.AttributeValue{
+				":pk": &types.AttributeValueMemberS{Value: campaignPK(campaignID)},
+				":sk": &types.AttributeValueMemberS{Value: skPrefix},
+			},
+			ExclusiveStartKey: startKey,
+		})
 		if err != nil {
 			return nil, err
 		}
-		encounters = append(encounters, enc)
+		for _, it := range out.Items {
+			enc, err := decode(it)
+			if err != nil {
+				return nil, err
+			}
+			encounters = append(encounters, enc)
+		}
+		if len(out.LastEvaluatedKey) == 0 {
+			return encounters, nil
+		}
+		startKey = out.LastEvaluatedKey
 	}
-	return encounters, nil
 }
 
 // Delete removes an encounter (idempotent — no error if it's already gone).

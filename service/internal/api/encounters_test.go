@@ -204,6 +204,120 @@ func TestRelease_LifecycleAndImmutability(t *testing.T) {
 	}
 }
 
+func TestUpdate_HappyPathAndStatusTransition(t *testing.T) {
+	h, _ := newHandler(t, true, 0)
+	router := campaignRoutes(h)
+	rec := do(t, router, http.MethodPost, encPath, `{"name":"orig","currency":{"gp":1}}`)
+	var enc model.Encounter
+	_ = json.Unmarshal(rec.Body.Bytes(), &enc)
+	base := encPath + "/" + enc.ID
+
+	// draft -> run, with edited fields
+	rec = do(t, router, http.MethodPut, base, `{"name":"renamed","currency":{"gp":5},"status":"run"}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("update = %d, want 200; body=%s", rec.Code, rec.Body)
+	}
+	var updated model.Encounter
+	_ = json.Unmarshal(rec.Body.Bytes(), &updated)
+	if updated.Name != "renamed" || updated.Currency.GP != 5 || updated.Status != model.StatusRun {
+		t.Fatalf("update did not apply fields/status: %+v", updated)
+	}
+	if updated.ID != enc.ID || !updated.CreatedAt.Equal(enc.CreatedAt) {
+		t.Fatalf("update mutated server-owned id/created_at: %+v", updated)
+	}
+
+	// update may not jump straight to released
+	if rec = do(t, router, http.MethodPut, base, `{"name":"x","status":"released"}`); rec.Code != http.StatusBadRequest {
+		t.Fatalf("update->released = %d, want 400", rec.Code)
+	}
+}
+
+func TestUpdate_MissingIs404(t *testing.T) {
+	h, _ := newHandler(t, true, 0)
+	rec := do(t, campaignRoutes(h), http.MethodPut, encPath+"/nope", `{"name":"x"}`)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("update missing = %d, want 404", rec.Code)
+	}
+}
+
+func TestCreate_RejectsEmptyRef(t *testing.T) {
+	h, _ := newHandler(t, true, 0)
+	// monster line references no content -> Validate rejects
+	rec := do(t, campaignRoutes(h), http.MethodPost, encPath, `{"name":"x","monsters":[{"count":1}]}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("empty-ref create = %d, want 400", rec.Code)
+	}
+}
+
+func TestCreate_DefaultsTreasureEnums(t *testing.T) {
+	h, _ := newHandler(t, true, 0)
+	body := `{"name":"x","treasure":[{"qty":1,"ref":{"game_id":"g"}}]}`
+	rec := do(t, campaignRoutes(h), http.MethodPost, encPath, body)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create = %d, want 201; body=%s", rec.Code, rec.Body)
+	}
+	var enc model.Encounter
+	_ = json.Unmarshal(rec.Body.Bytes(), &enc)
+	if enc.Treasure[0].SaleClass != model.SaleNormal || enc.Treasure[0].State != model.TreasureIntact {
+		t.Fatalf("unset enums not defaulted: %+v", enc.Treasure[0])
+	}
+}
+
+func TestDecodeBody_Rejects400(t *testing.T) {
+	h, _ := newHandler(t, true, 0)
+	router := campaignRoutes(h)
+	for name, body := range map[string]string{
+		"malformed json": `{`,
+		"unknown field":  `{"name":"x","bogus":1}`,
+	} {
+		if rec := do(t, router, http.MethodPost, encPath, body); rec.Code != http.StatusBadRequest {
+			t.Fatalf("%s: = %d, want 400", name, rec.Code)
+		}
+	}
+}
+
+// errDynamo fails every operation, to exercise the handlers' 500 paths.
+type errDynamo struct{}
+
+func (errDynamo) PutItem(context.Context, *dynamodb.PutItemInput, ...func(*dynamodb.Options)) (*dynamodb.PutItemOutput, error) {
+	return nil, errBoom
+}
+func (errDynamo) GetItem(context.Context, *dynamodb.GetItemInput, ...func(*dynamodb.Options)) (*dynamodb.GetItemOutput, error) {
+	return nil, errBoom
+}
+func (errDynamo) Query(context.Context, *dynamodb.QueryInput, ...func(*dynamodb.Options)) (*dynamodb.QueryOutput, error) {
+	return nil, errBoom
+}
+func (errDynamo) DeleteItem(context.Context, *dynamodb.DeleteItemInput, ...func(*dynamodb.Options)) (*dynamodb.DeleteItemOutput, error) {
+	return nil, errBoom
+}
+
+var errBoom = errorString("dynamo down")
+
+type errorString string
+
+func (e errorString) Error() string { return string(e) }
+
+func TestHandlers_StoreErrorsAre500(t *testing.T) {
+	srv := gmServer(t, true, 0)
+	t.Cleanup(srv.Close)
+	h := &handler{cfg: Config{Env: "test", Store: store.New(errDynamo{}, "t"), LetsRoll: letsroll.New(srv.URL)}}
+	router := campaignRoutes(h)
+
+	cases := map[string]struct {
+		method, path, body string
+	}{
+		"create": {http.MethodPost, encPath, `{"name":"x"}`},
+		"list":   {http.MethodGet, encPath, ""},
+		"get":    {http.MethodGet, encPath + "/id1", ""},
+	}
+	for name, tc := range cases {
+		if rec := do(t, router, tc.method, tc.path, tc.body); rec.Code != http.StatusInternalServerError {
+			t.Fatalf("%s under store error = %d, want 500", name, rec.Code)
+		}
+	}
+}
+
 func TestGet_NotFoundIs404(t *testing.T) {
 	h, _ := newHandler(t, true, 0)
 	rec := do(t, campaignRoutes(h), http.MethodGet, encPath+"/nope", "")

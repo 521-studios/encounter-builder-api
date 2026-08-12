@@ -48,22 +48,27 @@ func (h *handler) requireGM(next http.Handler) http.Handler {
 }
 
 func (h *handler) createEncounter(w http.ResponseWriter, r *http.Request) {
-	var enc model.Encounter
-	if !decodeBody(w, r, &enc) {
+	var in model.EncounterInput
+	if !decodeBody(w, r, &in) {
 		return
 	}
-	if err := enc.Validate(); err != nil {
+	if err := in.Validate(); err != nil {
 		writeJSON(w, http.StatusBadRequest, errBody(err.Error()))
 		return
 	}
 	now := time.Now().UTC()
-	enc.ID = newID()
-	enc.CampaignID = chi.URLParam(r, "campaignID")
-	enc.Status = model.StatusDraft
-	enc.ReleasedAt = nil
-	enc.CreatedAt = now
-	enc.UpdatedAt = now
-
+	enc := model.Encounter{
+		ID:         newID(),
+		CampaignID: chi.URLParam(r, "campaignID"),
+		Name:       in.Name,
+		Status:     model.StatusDraft, // new encounters always start in draft
+		Notes:      in.Notes,
+		Monsters:   in.Monsters,
+		Treasure:   in.Treasure,
+		Currency:   in.Currency,
+		CreatedAt:  now,
+		UpdatedAt:  now,
+	}
 	if err := h.cfg.Store.Put(r.Context(), enc); err != nil {
 		writeJSON(w, http.StatusInternalServerError, errBody("could not save encounter"))
 		return
@@ -97,7 +102,7 @@ func (h *handler) updateEncounter(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusConflict, errBody("encounter is released and can no longer be edited"))
 		return
 	}
-	var in model.Encounter
+	var in model.EncounterInput
 	if !decodeBody(w, r, &in) {
 		return
 	}

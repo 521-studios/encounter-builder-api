@@ -33,7 +33,7 @@ func TestFetchGame_ForwardsBearerAndParsesGM(t *testing.T) {
 }
 
 func TestFetchGame_ForbiddenAndNotFoundCollapse(t *testing.T) {
-	for _, code := range []int{http.StatusForbidden, http.StatusNotFound} {
+	for _, code := range []int{http.StatusUnauthorized, http.StatusForbidden, http.StatusNotFound} {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(code)
 		}))

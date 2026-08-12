@@ -62,7 +62,9 @@ func (c *Client) FetchGame(ctx context.Context, bearer, gameID string) (Game, er
 			return Game{}, fmt.Errorf("letsroll: decode game: %w", err)
 		}
 		return g, nil
-	case http.StatusForbidden, http.StatusNotFound:
+	case http.StatusUnauthorized, http.StatusForbidden, http.StatusNotFound:
+		// Our verifier already accepted this bearer, so a 401 here means
+		// lets-roll itself rejected it — from the caller's view, no access.
 		return Game{}, ErrForbidden
 	default:
 		return Game{}, fmt.Errorf("letsroll: unexpected status %d fetching game", resp.StatusCode)

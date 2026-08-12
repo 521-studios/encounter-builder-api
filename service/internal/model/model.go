@@ -26,6 +26,12 @@ type ContentRef struct {
 	JSON          json.RawMessage   `json:"json,omitempty"`
 }
 
+// isEmpty reports whether a ref names nothing — no pristine game_id, no derived
+// base, and no custom json. Such a ref points at no content and is invalid.
+func (r ContentRef) isEmpty() bool {
+	return r.GameID == "" && r.Base == nil && len(r.Modifications) == 0 && len(r.JSON) == 0
+}
+
 // Adjustment is the PF2e elite/weak template applied to a monster (±1 level).
 type Adjustment string
 
@@ -70,8 +76,8 @@ type TreasureLine struct {
 	Masked     bool          `json:"masked"`
 	MaskLabel  string        `json:"mask_label,omitempty"`
 	IdentifyDC int           `json:"identify_dc,omitempty"`
-	SaleClass  SaleClass     `json:"sale_class"`
-	State      TreasureState `json:"state"`
+	SaleClass  SaleClass     `json:"sale_class,omitempty"`
+	State      TreasureState `json:"state,omitempty"`
 	StateNote  string        `json:"state_note,omitempty"`
 }
 
@@ -113,32 +119,62 @@ var validAdjustments = map[Adjustment]bool{AdjustmentNone: true, AdjustmentElite
 var validSaleClasses = map[SaleClass]bool{SaleNormal: true, SalePureTreasure: true}
 var validTreasureStates = map[TreasureState]bool{TreasureIntact: true, TreasureConsumed: true, TreasureDestroyed: true}
 
-// Validate checks the client-supplied parts of an encounter. Server-owned
-// fields (id, status, timestamps) are set by handlers and not checked here.
-func (e Encounter) Validate() error {
-	if e.Name == "" {
+// EncounterInput is the client-writable shape for create/update. Keeping it
+// separate from Encounter is the invariant: server-owned fields (id, campaign,
+// status lifecycle, timestamps) simply aren't in this struct, so a client can't
+// set them — the handler maps the validated input onto a server-owned Encounter.
+type EncounterInput struct {
+	Name     string         `json:"name"`
+	Notes    string         `json:"notes,omitempty"`
+	Monsters []MonsterEntry `json:"monsters,omitempty"`
+	Treasure []TreasureLine `json:"treasure,omitempty"`
+	Currency Currency       `json:"currency"`
+	// Status is honored only by update, and only for draft<->run (release has
+	// its own endpoint). Empty means "leave unchanged".
+	Status Status `json:"status,omitempty"`
+}
+
+// Validate checks and normalizes the input in place: it fills default enum
+// values (so unset never persists as "") and rejects illegal states —
+// including a monster/treasure line whose ref points at no content.
+func (in *EncounterInput) Validate() error {
+	if in.Name == "" {
 		return fmt.Errorf("name is required")
 	}
-	for i, m := range e.Monsters {
+	for i := range in.Monsters {
+		m := &in.Monsters[i]
 		if m.Count < 1 {
 			return fmt.Errorf("monster[%d]: count must be >= 1", i)
 		}
-		if m.Adjustment != "" && !validAdjustments[m.Adjustment] {
+		if m.Ref.isEmpty() {
+			return fmt.Errorf("monster[%d]: ref must reference content (game_id, base, or json)", i)
+		}
+		if m.Adjustment == "" {
+			m.Adjustment = AdjustmentNone
+		} else if !validAdjustments[m.Adjustment] {
 			return fmt.Errorf("monster[%d]: invalid adjustment %q", i, m.Adjustment)
 		}
 	}
-	for i, t := range e.Treasure {
+	for i := range in.Treasure {
+		t := &in.Treasure[i]
 		if t.Qty < 1 {
 			return fmt.Errorf("treasure[%d]: qty must be >= 1", i)
 		}
-		if t.SaleClass != "" && !validSaleClasses[t.SaleClass] {
+		if t.Ref.isEmpty() {
+			return fmt.Errorf("treasure[%d]: ref must reference content (game_id, base, or json)", i)
+		}
+		if t.SaleClass == "" {
+			t.SaleClass = SaleNormal
+		} else if !validSaleClasses[t.SaleClass] {
 			return fmt.Errorf("treasure[%d]: invalid sale_class %q", i, t.SaleClass)
 		}
-		if t.State != "" && !validTreasureStates[t.State] {
+		if t.State == "" {
+			t.State = TreasureIntact
+		} else if !validTreasureStates[t.State] {
 			return fmt.Errorf("treasure[%d]: invalid state %q", i, t.State)
 		}
 	}
-	for _, c := range []int{e.Currency.CP, e.Currency.SP, e.Currency.GP, e.Currency.PP} {
+	for _, c := range []int{in.Currency.CP, in.Currency.SP, in.Currency.GP, in.Currency.PP} {
 		if c < 0 {
 			return fmt.Errorf("currency amounts must be >= 0")
 		}

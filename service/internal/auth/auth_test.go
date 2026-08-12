@@ -165,6 +165,27 @@ func TestMiddleware_401WithoutValidToken(t *testing.T) {
 	}
 }
 
+// TestMiddleware_PropagatesRawToken proves the verified bearer reaches the
+// handler via RawToken — the forwarding path the campaign GM-check depends on.
+func TestMiddleware_PropagatesRawToken(t *testing.T) {
+	tp := newTestProvider(t)
+	defer tp.close()
+	v := tp.verifier(t)
+
+	protected := v.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(RawToken(r.Context())))
+	}))
+
+	raw := tp.mint(t, nil)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set("Authorization", "Bearer "+raw)
+	protected.ServeHTTP(rec, req)
+	if rec.Body.String() != raw {
+		t.Fatalf("handler saw raw token %q, want the verified bearer", rec.Body.String())
+	}
+}
+
 // TestMiddleware_RejectsInvalidToken guards the fail-open path: a present but
 // invalid token must 401 AND must not reach the handler. (Without this, a
 // regression that dropped the Verify-error early-return would go uncaught.)
