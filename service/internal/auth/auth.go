@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -57,6 +58,9 @@ func NewVerifier(ctx context.Context, cfg Config) (*Verifier, error) {
 	if cfg.Issuer == "" {
 		return nil, errors.New("auth: Issuer is required")
 	}
+	if cfg.Audience == "" {
+		slog.Warn("auth: no Audience configured — access tokens for any client will be accepted")
+	}
 	httpClient := cfg.HTTPClient
 	if httpClient == nil {
 		httpClient = http.DefaultClient
@@ -71,15 +75,24 @@ func NewVerifier(ctx context.Context, cfg Config) (*Verifier, error) {
 		}
 	}
 
-	cache := jwk.NewCache(ctx)
+	// The JWKS cache runs a background refresh goroutine whose lifetime is the
+	// context passed to NewCache. Callers hand us a short startup-timeout ctx,
+	// which would kill that goroutine ~30s after boot and freeze key rotation —
+	// so detach it (keep values, drop the deadline). The passed ctx still bounds
+	// only the initial warm fetch below.
+	cache := jwk.NewCache(context.WithoutCancel(ctx))
 	if err := cache.Register(jwksURL,
 		jwk.WithHTTPClient(httpClient),
 		jwk.WithMinRefreshInterval(15*time.Minute),
 	); err != nil {
 		return nil, fmt.Errorf("auth: register jwks: %w", err)
 	}
+	// Best-effort warm: don't couple cold start (or the public /healthz) to the
+	// provider being reachable. A blip means the first *authed* request triggers
+	// the fetch; a persistent failure surfaces as a 401 there, not a dead boot.
 	if _, err := cache.Refresh(ctx, jwksURL); err != nil {
-		return nil, fmt.Errorf("auth: fetch jwks %s: %w", jwksURL, err)
+		slog.Warn("auth: initial JWKS fetch failed; will retry on first request",
+			"jwks", jwksURL, "err", err)
 	}
 
 	return &Verifier{

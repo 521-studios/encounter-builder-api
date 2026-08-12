@@ -133,17 +133,8 @@ resource "aws_lambda_function_url" "api" {
   authorization_type = "AWS_IAM"
 }
 
-# CloudFront needs BOTH permissions to invoke a Function-URL origin.
-resource "aws_lambda_permission" "cloudfront_invoke_url" {
-  statement_id  = "AllowCloudFrontInvokeFunctionUrl"
-  action        = "lambda:InvokeFunctionUrl"
-  function_name = aws_lambda_function.api.function_name
-  principal     = "cloudfront.amazonaws.com"
-}
-
-resource "aws_lambda_permission" "cloudfront_invoke" {
-  statement_id  = "AllowCloudFrontInvokeFunction"
-  action        = "lambda:InvokeFunction"
-  function_name = aws_lambda_function.api.function_name
-  principal     = "cloudfront.amazonaws.com"
-}
+# NOTE: the two aws_lambda_permission grants that let CloudFront invoke this
+# Function URL live in the infra-frontend `encounter-builder-cf` module, NOT
+# here — that module owns the distribution, so it scopes each permission with
+# `source_arn = <distribution.arn>` (avoiding a confused-deputy grant to any
+# distribution/account). Matches the wyrd-cf / pfsrd2-display-cf pattern.

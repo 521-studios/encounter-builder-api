@@ -21,6 +21,11 @@ type Config struct {
 // NewRouter wires the routes. The same *chi.Mux is served by cmd/lambda (via the
 // API-Gateway-v2 proxy adapter) and cmd/local (via net/http).
 func NewRouter(cfg Config) *chi.Mux {
+	if cfg.Auth == nil {
+		// Fail fast at construction rather than nil-panic deep in the middleware
+		// on the first request — every protected route depends on it.
+		panic("api: NewRouter requires a non-nil Auth verifier")
+	}
 	h := &handler{cfg: cfg}
 
 	r := chi.NewRouter()

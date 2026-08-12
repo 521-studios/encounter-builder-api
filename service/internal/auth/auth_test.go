@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -161,6 +162,89 @@ func TestMiddleware_401WithoutValidToken(t *testing.T) {
 	}
 	if rec.Body.String() != "42" {
 		t.Fatalf("handler saw subject %q, want 42", rec.Body.String())
+	}
+}
+
+// TestMiddleware_RejectsInvalidToken guards the fail-open path: a present but
+// invalid token must 401 AND must not reach the handler. (Without this, a
+// regression that dropped the Verify-error early-return would go uncaught.)
+func TestMiddleware_RejectsInvalidToken(t *testing.T) {
+	tp := newTestProvider(t)
+	defer tp.close()
+	v := tp.verifier(t)
+
+	reached := false
+	protected := v.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reached = true
+	}))
+
+	tokens := map[string]string{
+		"garbage":        "not-a-jwt",
+		"expired":        tp.mint(t, func(b *jwt.Builder) *jwt.Builder { return b.Expiration(time.Now().Add(-time.Hour)) }),
+		"wrong audience": tp.mint(t, func(b *jwt.Builder) *jwt.Builder { return b.Audience([]string{"evil"}) }),
+	}
+	for name, token := range tokens {
+		reached = false
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.Header.Set("Authorization", "Bearer "+token)
+		protected.ServeHTTP(rec, req)
+		if rec.Code != http.StatusUnauthorized {
+			t.Errorf("%s: status = %d, want 401", name, rec.Code)
+		}
+		if reached {
+			t.Errorf("%s: handler was reached despite an invalid token (fail-open!)", name)
+		}
+	}
+}
+
+// TestVerify_RejectsAlgNone covers the classic alg=none JWT bypass vector.
+func TestVerify_RejectsAlgNone(t *testing.T) {
+	tp := newTestProvider(t)
+	defer tp.close()
+	v := tp.verifier(t)
+
+	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"none","typ":"JWT"}`))
+	payload, _ := json.Marshal(map[string]any{
+		"sub": "42", "iss": tp.issuer, "aud": tp.audience, "exp": time.Now().Add(time.Hour).Unix(),
+	})
+	none := header + "." + base64.RawURLEncoding.EncodeToString(payload) + "."
+	if _, err := v.Verify(context.Background(), none); err == nil {
+		t.Fatal("alg=none token was accepted")
+	}
+}
+
+// TestVerify_RejectsUnknownKid: a token whose kid isn't in the JWKS is rejected
+// (key not found), distinct from the same-kid wrong-signature case.
+func TestVerify_RejectsUnknownKid(t *testing.T) {
+	tp := newTestProvider(t)
+	defer tp.close()
+	v := tp.verifier(t)
+
+	raw, _ := rsa.GenerateKey(rand.Reader, 2048)
+	k, _ := jwk.FromRaw(raw)
+	_ = k.Set(jwk.KeyIDKey, "unknown-kid")
+	_ = k.Set(jwk.AlgorithmKey, jwa.RS256)
+	tok, _ := jwt.NewBuilder().Issuer(tp.issuer).Subject("42").
+		Audience([]string{tp.audience}).Expiration(time.Now().Add(time.Hour)).Build()
+	signed, _ := jwt.Sign(tok, jwt.WithKey(jwa.RS256, k))
+	if _, err := v.Verify(context.Background(), string(signed)); err == nil {
+		t.Fatal("token with an unknown kid was accepted")
+	}
+}
+
+// TestVerify_RejectsMissingAudience: when an audience is required, a token with
+// no aud claim at all must be rejected (absence, not just mismatch).
+func TestVerify_RejectsMissingAudience(t *testing.T) {
+	tp := newTestProvider(t)
+	defer tp.close()
+	v := tp.verifier(t) // audience = encounter-builder-web
+
+	tok, _ := jwt.NewBuilder().Issuer(tp.issuer).Subject("42").
+		Expiration(time.Now().Add(time.Hour)).Build() // no Audience()
+	signed, _ := jwt.Sign(tok, jwt.WithKey(jwa.RS256, tp.signKey))
+	if _, err := v.Verify(context.Background(), string(signed)); err == nil {
+		t.Fatal("token with no audience claim was accepted despite a required audience")
 	}
 }
 
