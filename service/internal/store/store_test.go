@@ -203,6 +203,34 @@ func TestStore_ListEmptyIsNonNil(t *testing.T) {
 	}
 }
 
+// TestStore_DecodesLegacyEncounter proves back-compat: a payload written before
+// the v2 fields existed (no chapter_id / description) still decodes, with those
+// fields as their zero values — so old encounters keep working after the upgrade.
+func TestStore_DecodesLegacyEncounter(t *testing.T) {
+	fake := newFake()
+	st := New(fake, "test-table")
+	ctx := context.Background()
+
+	// A legacy item: full encounter JSON minus the v2 fields.
+	legacy := `{"id":"enc-old","campaign_id":"game-42","name":"Old Fight","status":"draft","monsters":[],"treasure":[],"currency":{"cp":0,"sp":0,"gp":5,"pp":0},"created_at":"2020-01-01T00:00:00Z","updated_at":"2020-01-01T00:00:00Z"}`
+	fake.items[campaignPK("game-42")+"\x00"+encounterSK("enc-old")] = map[string]types.AttributeValue{
+		"pk":      &types.AttributeValueMemberS{Value: campaignPK("game-42")},
+		"sk":      &types.AttributeValueMemberS{Value: encounterSK("enc-old")},
+		"payload": &types.AttributeValueMemberS{Value: legacy},
+	}
+
+	got, err := st.Get(ctx, "game-42", "enc-old")
+	if err != nil {
+		t.Fatalf("Get legacy: %v", err)
+	}
+	if got.Name != "Old Fight" || got.Currency.GP != 5 {
+		t.Fatalf("legacy decode lost fields: %+v", got)
+	}
+	if got.ChapterID != "" || got.Description != "" {
+		t.Fatalf("v2 fields should default to empty on a legacy row: chapter=%q desc=%q", got.ChapterID, got.Description)
+	}
+}
+
 func TestStore_Delete(t *testing.T) {
 	st := New(newFake(), "test-table")
 	ctx := context.Background()

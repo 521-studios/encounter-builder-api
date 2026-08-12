@@ -103,28 +103,35 @@ const (
 
 // Encounter is the aggregate stored per (campaign, encounter). CampaignID is
 // the lets-roll game_id; monsters/items are contentRefs, never copied content.
+//
+// ChapterID (v2) groups the encounter under a Chapter in the GM sidebar; empty
+// or dangling (chapter deleted) means it renders under the synthetic "Unsorted"
+// group — deliberately not validated against an existing chapter, so deleting a
+// chapter never orphans an encounter. Description is GM-authored markdown,
+// rendered by the frontend (the API stores it verbatim, no sanitization here).
+// Monster templates need no new field: a templated monster is just a derived
+// MonsterEntry.Ref ({base, modifications:[{template_game_id, selections}…], json}).
 type Encounter struct {
-	ID         string         `json:"id"`
-	CampaignID string         `json:"campaign_id"`
-	Name       string         `json:"name"`
-	Status     Status         `json:"status"`
-	Notes      string         `json:"notes,omitempty"`
-	Monsters   []MonsterEntry `json:"monsters"`
-	Treasure   []TreasureLine `json:"treasure"`
-	Currency   Currency       `json:"currency"`
-	ReleasedAt *time.Time     `json:"released_at,omitempty"`
-	CreatedAt  time.Time      `json:"created_at"`
-	UpdatedAt  time.Time      `json:"updated_at"`
+	ID          string         `json:"id"`
+	CampaignID  string         `json:"campaign_id"`
+	Name        string         `json:"name"`
+	Status      Status         `json:"status"`
+	ChapterID   string         `json:"chapter_id,omitempty"`
+	Description string         `json:"description,omitempty"`
+	Notes       string         `json:"notes,omitempty"`
+	Monsters    []MonsterEntry `json:"monsters"`
+	Treasure    []TreasureLine `json:"treasure"`
+	Currency    Currency       `json:"currency"`
+	ReleasedAt  *time.Time     `json:"released_at,omitempty"`
+	CreatedAt   time.Time      `json:"created_at"`
+	UpdatedAt   time.Time      `json:"updated_at"`
 }
 
 // Chapter is a subdivision of a campaign that groups encounters (like an
 // adventure's chapters/parts). Stored per (campaign, chapter). Order drives the
-// sidebar sort.
-//
-// The encounter->chapter link (an Encounter.chapter_id field, with chapterless
-// encounters falling under a synthetic "Unsorted" group in the UI) is NOT wired
-// yet — it lands with the encounter-v2 slice (bd_521Studios-sdmq). Until then a
-// Chapter is a standalone grouping entity nothing references.
+// sidebar sort. Encounters reference a chapter via Encounter.ChapterID; an empty
+// or dangling reference falls under a synthetic "Unsorted" group in the UI (the
+// link is intentionally soft — see Encounter.ChapterID).
 type Chapter struct {
 	ID         string    `json:"id"`
 	CampaignID string    `json:"campaign_id"`
@@ -157,11 +164,13 @@ var validTreasureStates = map[TreasureState]bool{TreasureIntact: true, TreasureC
 // status lifecycle, timestamps) simply aren't in this struct, so a client can't
 // set them — the handler maps the validated input onto a server-owned Encounter.
 type EncounterInput struct {
-	Name     string         `json:"name"`
-	Notes    string         `json:"notes,omitempty"`
-	Monsters []MonsterEntry `json:"monsters,omitempty"`
-	Treasure []TreasureLine `json:"treasure,omitempty"`
-	Currency Currency       `json:"currency"`
+	Name        string         `json:"name"`
+	ChapterID   string         `json:"chapter_id,omitempty"`
+	Description string         `json:"description,omitempty"`
+	Notes       string         `json:"notes,omitempty"`
+	Monsters    []MonsterEntry `json:"monsters,omitempty"`
+	Treasure    []TreasureLine `json:"treasure,omitempty"`
+	Currency    Currency       `json:"currency"`
 	// Status is honored only by update, and only for draft<->run (release has
 	// its own endpoint). Empty means "leave unchanged".
 	Status Status `json:"status,omitempty"`
