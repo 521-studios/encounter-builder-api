@@ -6,7 +6,9 @@ import (
 	"testing"
 
 	"github.com/521studios/encounter-builder-api/internal/auth"
+	"github.com/521studios/encounter-builder-api/internal/letsroll"
 	"github.com/521studios/encounter-builder-api/internal/model"
+	"github.com/521studios/encounter-builder-api/internal/store"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -112,5 +114,26 @@ func TestChapter_UpdateMissingIs404(t *testing.T) {
 	rec := do(t, chapterRoutes(h), http.MethodPut, chPath+"/nope", `{"name":"x"}`)
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("update missing = %d, want 404", rec.Code)
+	}
+}
+
+// Mirror TestHandlers_StoreErrorsAre500 for chapters: every chapter handler must
+// surface a store failure as 500, never a silent success or wrong status.
+func TestChapterHandlers_StoreErrorsAre500(t *testing.T) {
+	srv := gmServer(t, true, 0)
+	t.Cleanup(srv.Close)
+	h := &handler{cfg: Config{Env: "test", Store: store.New(errDynamo{}, "t"), LetsRoll: letsroll.New(srv.URL)}}
+	router := chapterRoutes(h)
+
+	cases := map[string]struct{ method, path, body string }{
+		"create": {http.MethodPost, chPath, `{"name":"x"}`},
+		"list":   {http.MethodGet, chPath, ""},
+		"update": {http.MethodPut, chPath + "/id1", `{"name":"x"}`}, // loadChapter's non-NotFound path -> 500
+		"delete": {http.MethodDelete, chPath + "/id1", ""},
+	}
+	for name, tc := range cases {
+		if rec := do(t, router, tc.method, tc.path, tc.body); rec.Code != http.StatusInternalServerError {
+			t.Fatalf("%s under store error = %d, want 500", name, rec.Code)
+		}
 	}
 }

@@ -119,8 +119,12 @@ type Encounter struct {
 
 // Chapter is a subdivision of a campaign that groups encounters (like an
 // adventure's chapters/parts). Stored per (campaign, chapter). Order drives the
-// sidebar sort; encounters reference a chapter via chapter_id (a chapterless
-// encounter renders under a synthetic "Unsorted" group in the UI).
+// sidebar sort.
+//
+// The encounter->chapter link (an Encounter.chapter_id field, with chapterless
+// encounters falling under a synthetic "Unsorted" group in the UI) is NOT wired
+// yet — it lands with the encounter-v2 slice (bd_521Studios-sdmq). Until then a
+// Chapter is a standalone grouping entity nothing references.
 type Chapter struct {
 	ID         string    `json:"id"`
 	CampaignID string    `json:"campaign_id"`

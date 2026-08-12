@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/521studios/encounter-builder-api/internal/model"
+	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 )
 
 func sampleChapter() model.Chapter {
@@ -104,6 +105,32 @@ func TestStore_ListChaptersEmptyIsNonNil(t *testing.T) {
 	}
 	if got == nil {
 		t.Fatal("ListChapters returned nil; must be non-nil so it encodes as [] not null")
+	}
+}
+
+// TestStore_ListChaptersPaginates exercises ListChapters' LastEvaluatedKey
+// continuation loop (its own copy of List's pagination), reusing pagingDynamo.
+func TestStore_ListChaptersPaginates(t *testing.T) {
+	mk := func(id string) map[string]types.AttributeValue {
+		c := sampleChapter()
+		c.ID = id
+		payload, _ := json.Marshal(c)
+		return map[string]types.AttributeValue{
+			"pk":      &types.AttributeValueMemberS{Value: campaignPK(c.CampaignID)},
+			"sk":      &types.AttributeValueMemberS{Value: chapterSK(id)},
+			"payload": &types.AttributeValueMemberS{Value: string(payload)},
+		}
+	}
+	db := &pagingDynamo{pages: []map[string]types.AttributeValue{mk("a"), mk("b"), mk("c")}}
+	got, err := New(db, "t").ListChapters(context.Background(), "game-42")
+	if err != nil {
+		t.Fatalf("ListChapters: %v", err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("ListChapters returned %d across pages, want 3", len(got))
+	}
+	if db.calls != 3 {
+		t.Fatalf("issued %d queries, want 3 (one per page)", db.calls)
 	}
 }
 
