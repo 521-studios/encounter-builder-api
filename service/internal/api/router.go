@@ -57,6 +57,15 @@ func NewRouter(cfg Config) *chi.Mux {
 			r.Delete("/{encounterID}", h.deleteEncounter)
 			r.Post("/{encounterID}/release", h.releaseEncounter)
 		})
+
+		// Chapters: campaign subdivisions grouping encounters in the GM sidebar.
+		r.Route("/api/app/campaigns/{campaignID}/chapters", func(r chi.Router) {
+			r.Use(h.requireGM)
+			r.Post("/", h.createChapter)
+			r.Get("/", h.listChapters)
+			r.Put("/{chapterID}", h.updateChapter)
+			r.Delete("/{chapterID}", h.deleteChapter)
+		})
 	})
 
 	return r

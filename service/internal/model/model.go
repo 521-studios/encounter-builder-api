@@ -117,6 +117,37 @@ type Encounter struct {
 	UpdatedAt  time.Time      `json:"updated_at"`
 }
 
+// Chapter is a subdivision of a campaign that groups encounters (like an
+// adventure's chapters/parts). Stored per (campaign, chapter). Order drives the
+// sidebar sort.
+//
+// The encounter->chapter link (an Encounter.chapter_id field, with chapterless
+// encounters falling under a synthetic "Unsorted" group in the UI) is NOT wired
+// yet — it lands with the encounter-v2 slice (bd_521Studios-sdmq). Until then a
+// Chapter is a standalone grouping entity nothing references.
+type Chapter struct {
+	ID         string    `json:"id"`
+	CampaignID string    `json:"campaign_id"`
+	Name       string    `json:"name"`
+	Order      int       `json:"order"`
+	CreatedAt  time.Time `json:"created_at"`
+	UpdatedAt  time.Time `json:"updated_at"`
+}
+
+// ChapterInput is the client-writable shape for create/update (server owns
+// id/campaign/timestamps). Order is optional — omit to leave it unchanged.
+type ChapterInput struct {
+	Name  string `json:"name"`
+	Order *int   `json:"order,omitempty"`
+}
+
+func (in ChapterInput) Validate() error {
+	if in.Name == "" {
+		return fmt.Errorf("name is required")
+	}
+	return nil
+}
+
 var validAdjustments = map[Adjustment]bool{AdjustmentNone: true, AdjustmentElite: true, AdjustmentWeak: true}
 var validSaleClasses = map[SaleClass]bool{SaleNormal: true, SalePureTreasure: true}
 var validTreasureStates = map[TreasureState]bool{TreasureIntact: true, TreasureConsumed: true, TreasureDestroyed: true}

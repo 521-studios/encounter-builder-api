@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 
 	"github.com/521studios/encounter-builder-api/internal/model"
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -41,9 +42,11 @@ func New(db DynamoAPI, table string) *Store {
 }
 
 const skPrefix = "ENCOUNTER#"
+const chapterSKPrefix = "CHAPTER#"
 
 func campaignPK(campaignID string) string { return "CAMPAIGN#" + campaignID }
 func encounterSK(id string) string        { return skPrefix + id }
+func chapterSK(id string) string          { return chapterSKPrefix + id }
 
 func (s *Store) key(campaignID, id string) map[string]types.AttributeValue {
 	return map[string]types.AttributeValue{
@@ -52,19 +55,45 @@ func (s *Store) key(campaignID, id string) map[string]types.AttributeValue {
 	}
 }
 
-// Put creates or replaces an encounter.
-func (s *Store) Put(ctx context.Context, enc model.Encounter) error {
-	payload, err := json.Marshal(enc)
-	if err != nil {
-		return fmt.Errorf("store: marshal encounter: %w", err)
+func (s *Store) chapterKey(campaignID, id string) map[string]types.AttributeValue {
+	return map[string]types.AttributeValue{
+		"pk": &types.AttributeValueMemberS{Value: campaignPK(campaignID)},
+		"sk": &types.AttributeValueMemberS{Value: chapterSK(id)},
 	}
-	item := s.key(enc.CampaignID, enc.ID)
-	item["payload"] = &types.AttributeValueMemberS{Value: string(payload)}
+}
+
+// putPayload marshals v to JSON and writes it as the item's payload attribute.
+// Shared by every aggregate on this table (encounters, chapters) — they differ
+// only in their key, not in how the body is stored.
+func (s *Store) putPayload(ctx context.Context, key map[string]types.AttributeValue, v any) error {
+	payload, err := json.Marshal(v)
+	if err != nil {
+		return fmt.Errorf("store: marshal payload: %w", err)
+	}
+	key["payload"] = &types.AttributeValueMemberS{Value: string(payload)}
 	_, err = s.db.PutItem(ctx, &dynamodb.PutItemInput{
 		TableName: aws.String(s.table),
-		Item:      item,
+		Item:      key,
 	})
 	return err
+}
+
+// decodePayload unmarshals an item's payload attribute into T.
+func decodePayload[T any](item map[string]types.AttributeValue) (T, error) {
+	var v T
+	payload, ok := item["payload"].(*types.AttributeValueMemberS)
+	if !ok {
+		return v, fmt.Errorf("store: item missing payload attribute")
+	}
+	if err := json.Unmarshal([]byte(payload.Value), &v); err != nil {
+		return v, fmt.Errorf("store: unmarshal payload: %w", err)
+	}
+	return v, nil
+}
+
+// Put creates or replaces an encounter.
+func (s *Store) Put(ctx context.Context, enc model.Encounter) error {
+	return s.putPayload(ctx, s.key(enc.CampaignID, enc.ID), enc)
 }
 
 // Get returns one encounter, or ErrNotFound.
@@ -125,13 +154,76 @@ func (s *Store) Delete(ctx context.Context, campaignID, id string) error {
 }
 
 func decode(item map[string]types.AttributeValue) (model.Encounter, error) {
-	payload, ok := item["payload"].(*types.AttributeValueMemberS)
-	if !ok {
-		return model.Encounter{}, fmt.Errorf("store: item missing payload attribute")
+	return decodePayload[model.Encounter](item)
+}
+
+// PutChapter creates or replaces a chapter.
+func (s *Store) PutChapter(ctx context.Context, ch model.Chapter) error {
+	return s.putPayload(ctx, s.chapterKey(ch.CampaignID, ch.ID), ch)
+}
+
+// GetChapter returns one chapter, or ErrNotFound.
+func (s *Store) GetChapter(ctx context.Context, campaignID, id string) (model.Chapter, error) {
+	out, err := s.db.GetItem(ctx, &dynamodb.GetItemInput{
+		TableName: aws.String(s.table),
+		Key:       s.chapterKey(campaignID, id),
+	})
+	if err != nil {
+		return model.Chapter{}, err
 	}
-	var enc model.Encounter
-	if err := json.Unmarshal([]byte(payload.Value), &enc); err != nil {
-		return model.Encounter{}, fmt.Errorf("store: unmarshal encounter: %w", err)
+	if out.Item == nil {
+		return model.Chapter{}, ErrNotFound
 	}
-	return enc, nil
+	return decodePayload[model.Chapter](out.Item)
+}
+
+// ListChapters returns a campaign's chapters, sorted by (Order, Name) so the
+// sidebar order is deterministic. Follows DynamoDB pagination like List.
+func (s *Store) ListChapters(ctx context.Context, campaignID string) ([]model.Chapter, error) {
+	chapters := make([]model.Chapter, 0) // non-nil so empty encodes as [] not null
+	var startKey map[string]types.AttributeValue
+	for {
+		out, err := s.db.Query(ctx, &dynamodb.QueryInput{
+			TableName:              aws.String(s.table),
+			KeyConditionExpression: aws.String("pk = :pk AND begins_with(sk, :sk)"),
+			ExpressionAttributeValues: map[string]types.AttributeValue{
+				":pk": &types.AttributeValueMemberS{Value: campaignPK(campaignID)},
+				":sk": &types.AttributeValueMemberS{Value: chapterSKPrefix},
+			},
+			ExclusiveStartKey: startKey,
+		})
+		if err != nil {
+			return nil, err
+		}
+		for _, it := range out.Items {
+			ch, err := decodePayload[model.Chapter](it)
+			if err != nil {
+				return nil, err
+			}
+			chapters = append(chapters, ch)
+		}
+		if len(out.LastEvaluatedKey) == 0 {
+			break
+		}
+		startKey = out.LastEvaluatedKey
+	}
+	sort.SliceStable(chapters, func(i, j int) bool {
+		if chapters[i].Order != chapters[j].Order {
+			return chapters[i].Order < chapters[j].Order
+		}
+		return chapters[i].Name < chapters[j].Name
+	})
+	return chapters, nil
+}
+
+// DeleteChapter removes a chapter (idempotent). Nothing references a chapter
+// yet (see model.Chapter), so there's no cascade. Once the encounter->chapter
+// link lands (bd_521Studios-sdmq), a deleted chapter's encounters are meant to
+// fall back to the "Unsorted" group rather than cascade-delete.
+func (s *Store) DeleteChapter(ctx context.Context, campaignID, id string) error {
+	_, err := s.db.DeleteItem(ctx, &dynamodb.DeleteItemInput{
+		TableName: aws.String(s.table),
+		Key:       s.chapterKey(campaignID, id),
+	})
+	return err
 }
