@@ -1,0 +1,16 @@
+services:
+  encounter-builder-api:
+    build:
+      context: .
+      dockerfile: service/Dockerfile.dev
+    volumes:
+      - ./service:/app
+      - ${HOME}/.aws:/root/.aws:ro
+    environment:
+      ENV: local
+      OIDC_ISSUER: https://lets-roll.staging.521studios.com
+      OIDC_AUDIENCE: encounter-builder-web
+      AWS_PROFILE: 521-Staging-Admin
+      AWS_REGION: us-east-2
+    ports:
+      - "8090:8090"

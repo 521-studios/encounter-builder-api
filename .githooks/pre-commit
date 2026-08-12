@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# gofmt gate (mirrors CI). Install: git config core.hooksPath .githooks
+set -e
+cd "$(dirname "$0")/../service"
+unformatted=$(gofmt -l .)
+if [ -n "$unformatted" ]; then
+  echo "gofmt: unformatted files:"; echo "$unformatted"
+  echo "run: gofmt -w ."
+  exit 1
+fi
