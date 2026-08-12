@@ -33,7 +33,7 @@ func New(baseURL string) *Client {
 
 // Game is the subset of lets-roll's /api/v1/games/:id we care about.
 type Game struct {
-	ID   string `json:"id"`
+	ID   int    `json:"id"` // lets-roll game ids are integers
 	Name string `json:"name"`
 	AmGM bool   `json:"am_gm"`
 }

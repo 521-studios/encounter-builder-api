@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -36,6 +37,10 @@ func (h *handler) requireGM(next http.Handler) http.Handler {
 			return
 		}
 		if err != nil {
+			// Log the real cause — a 502 here is otherwise a black box (e.g. a
+			// decode mismatch or a lets-roll outage looks identical to the client).
+			slog.ErrorContext(r.Context(), "requireGM: lets-roll membership check failed",
+				"campaign", campaignID, "error", err)
 			writeJSON(w, http.StatusBadGateway, errBody("could not verify campaign membership"))
 			return
 		}
