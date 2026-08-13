@@ -43,6 +43,7 @@ func New(db DynamoAPI, table string) *Store {
 
 const skPrefix = "ENCOUNTER#"
 const chapterSKPrefix = "CHAPTER#"
+const settingsSK = "SETTINGS" // singleton per campaign; not a prefixed range
 
 func campaignPK(campaignID string) string { return "CAMPAIGN#" + campaignID }
 func encounterSK(id string) string        { return skPrefix + id }
@@ -226,4 +227,33 @@ func (s *Store) DeleteChapter(ctx context.Context, campaignID, id string) error 
 		Key:       s.chapterKey(campaignID, id),
 	})
 	return err
+}
+
+func (s *Store) settingsKey(campaignID string) map[string]types.AttributeValue {
+	return map[string]types.AttributeValue{
+		"pk": &types.AttributeValueMemberS{Value: campaignPK(campaignID)},
+		"sk": &types.AttributeValueMemberS{Value: settingsSK},
+	}
+}
+
+// GetSettings returns a campaign's expected-party defaults, or ErrNotFound when
+// none have been saved. Settings are a singleton item (one per campaign), not a
+// prefixed range, so encounter/chapter list Queries never pick it up.
+func (s *Store) GetSettings(ctx context.Context, campaignID string) (model.CampaignSettings, error) {
+	out, err := s.db.GetItem(ctx, &dynamodb.GetItemInput{
+		TableName: aws.String(s.table),
+		Key:       s.settingsKey(campaignID),
+	})
+	if err != nil {
+		return model.CampaignSettings{}, err
+	}
+	if out.Item == nil {
+		return model.CampaignSettings{}, ErrNotFound
+	}
+	return decodePayload[model.CampaignSettings](out.Item)
+}
+
+// PutSettings creates or replaces a campaign's settings singleton.
+func (s *Store) PutSettings(ctx context.Context, cs model.CampaignSettings) error {
+	return s.putPayload(ctx, s.settingsKey(cs.CampaignID), cs)
 }

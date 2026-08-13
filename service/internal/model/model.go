@@ -126,9 +126,15 @@ type Encounter struct {
 	Monsters    []MonsterEntry `json:"monsters"`
 	Treasure    []TreasureLine `json:"treasure"`
 	Currency    Currency       `json:"currency"`
-	ReleasedAt  *time.Time     `json:"released_at,omitempty"`
-	CreatedAt   time.Time      `json:"created_at"`
-	UpdatedAt   time.Time      `json:"updated_at"`
+	// PartyLevel/PartySize are the encounter's expected party level and PC count
+	// used for treasure/difficulty budgeting. nil means "inherit" — the client
+	// resolves encounter -> chapter -> campaign settings -> app default. The API
+	// stores the raw override; it does not resolve inheritance.
+	PartyLevel *int       `json:"party_level,omitempty"`
+	PartySize  *int       `json:"party_size,omitempty"`
+	ReleasedAt *time.Time `json:"released_at,omitempty"`
+	CreatedAt  time.Time  `json:"created_at"`
+	UpdatedAt  time.Time  `json:"updated_at"`
 }
 
 // Chapter is a subdivision of a campaign that groups encounters (like an
@@ -137,10 +143,15 @@ type Encounter struct {
 // or dangling reference falls under a synthetic "Unsorted" group in the UI (the
 // link is intentionally soft — see Encounter.ChapterID).
 type Chapter struct {
-	ID         string    `json:"id"`
-	CampaignID string    `json:"campaign_id"`
-	Name       string    `json:"name"`
-	Order      int       `json:"order"`
+	ID         string `json:"id"`
+	CampaignID string `json:"campaign_id"`
+	Name       string `json:"name"`
+	Order      int    `json:"order"`
+	// PartyLevel/PartySize are the chapter's default expected party level and PC
+	// count; encounters inherit them unless overridden. nil means the chapter
+	// itself inherits from campaign settings. Raw override only — no resolution.
+	PartyLevel *int      `json:"party_level,omitempty"`
+	PartySize  *int      `json:"party_size,omitempty"`
 	CreatedAt  time.Time `json:"created_at"`
 	UpdatedAt  time.Time `json:"updated_at"`
 }
@@ -148,15 +159,39 @@ type Chapter struct {
 // ChapterInput is the client-writable shape for create/update (server owns
 // id/campaign/timestamps). Order is optional — omit to leave it unchanged.
 type ChapterInput struct {
-	Name  string `json:"name"`
-	Order *int   `json:"order,omitempty"`
+	Name       string `json:"name"`
+	Order      *int   `json:"order,omitempty"`
+	PartyLevel *int   `json:"party_level,omitempty"`
+	PartySize  *int   `json:"party_size,omitempty"`
 }
 
 func (in ChapterInput) Validate() error {
 	if in.Name == "" {
 		return fmt.Errorf("name is required")
 	}
-	return nil
+	return validateParty(in.PartyLevel, in.PartySize)
+}
+
+// CampaignSettings holds per-campaign defaults that encounters/chapters inherit.
+// It's a singleton per campaign (one item under CAMPAIGN#<id>). PartyLevel/
+// PartySize are the base of the inheritance chain (campaign -> chapter ->
+// encounter); nil means "unset", and the client falls back to an app default.
+type CampaignSettings struct {
+	CampaignID string     `json:"campaign_id"`
+	PartyLevel *int       `json:"party_level,omitempty"`
+	PartySize  *int       `json:"party_size,omitempty"`
+	UpdatedAt  *time.Time `json:"updated_at,omitempty"`
+}
+
+// CampaignSettingsInput is the client-writable shape (PUT replaces the settings;
+// server owns campaign id + timestamp).
+type CampaignSettingsInput struct {
+	PartyLevel *int `json:"party_level,omitempty"`
+	PartySize  *int `json:"party_size,omitempty"`
+}
+
+func (in CampaignSettingsInput) Validate() error {
+	return validateParty(in.PartyLevel, in.PartySize)
 }
 
 var validAdjustments = map[Adjustment]bool{AdjustmentNone: true, AdjustmentElite: true, AdjustmentWeak: true}
@@ -175,6 +210,10 @@ type EncounterInput struct {
 	Monsters    []MonsterEntry `json:"monsters,omitempty"`
 	Treasure    []TreasureLine `json:"treasure,omitempty"`
 	Currency    Currency       `json:"currency"`
+	// PartyLevel/PartySize override the inherited expected-party values; nil
+	// leaves the encounter inheriting from its chapter/campaign.
+	PartyLevel *int `json:"party_level,omitempty"`
+	PartySize  *int `json:"party_size,omitempty"`
 	// Status is honored only by update, and only for draft<->run (release has
 	// its own endpoint). Empty means "leave unchanged".
 	Status Status `json:"status,omitempty"`
@@ -224,6 +263,20 @@ func (in *EncounterInput) Validate() error {
 		if c < 0 {
 			return fmt.Errorf("currency amounts must be >= 0")
 		}
+	}
+	return validateParty(in.PartyLevel, in.PartySize)
+}
+
+// validateParty checks the optional expected-party fields shared by encounters,
+// chapters, and campaign settings. nil means "inherit from the level above" and
+// is always allowed; when set, the values must be sane — PF2e levels run 1–20
+// (the span of the treasure/XP tables) and a party has at least one PC.
+func validateParty(level, size *int) error {
+	if level != nil && (*level < 1 || *level > 20) {
+		return fmt.Errorf("party_level must be between 1 and 20")
+	}
+	if size != nil && *size < 1 {
+		return fmt.Errorf("party_size must be >= 1")
 	}
 	return nil
 }

@@ -66,6 +66,13 @@ func NewRouter(cfg Config) *chi.Mux {
 			r.Put("/{chapterID}", h.updateChapter)
 			r.Delete("/{chapterID}", h.deleteChapter)
 		})
+
+		// Campaign settings: the base of the expected-party inheritance chain.
+		r.Route("/api/app/campaigns/{campaignID}/settings", func(r chi.Router) {
+			r.Use(h.requireGM)
+			r.Get("/", h.getSettings)
+			r.Put("/", h.putSettings)
+		})
 	})
 
 	return r
