@@ -70,16 +70,14 @@ func (h *handler) updateChapter(w http.ResponseWriter, r *http.Request) {
 	if in.Order != nil {
 		ch.Order = *in.Order
 	}
-	// Party defaults, like order, are only touched when supplied — so the sidebar
-	// rename ({"name":…}) can't wipe a chapter's expected-party settings. (The
-	// encounter editor sends full state and thus overwrites; chapters get partial
-	// updates. Clearing a chapter default back to inherit is a Slice-3 concern.)
-	if in.PartyLevel != nil {
-		ch.PartyLevel = in.PartyLevel
-	}
-	if in.PartySize != nil {
-		ch.PartySize = in.PartySize
-	}
+	// Party defaults are full-replaced (like the encounter's), so a nil field
+	// clears the chapter's override back to inherit from campaign settings — the
+	// clear-to-inherit path the detail page needs. Callers that send partial
+	// updates (the sidebar rename) MUST round-trip party_level/party_size, or a
+	// rename would wipe them. Order stays touch-only-when-supplied for back-compat
+	// with the existing rename; the frontend round-trips both.
+	ch.PartyLevel = in.PartyLevel
+	ch.PartySize = in.PartySize
 	ch.UpdatedAt = time.Now().UTC()
 	if err := h.cfg.Store.PutChapter(r.Context(), ch); err != nil {
 		writeJSON(w, http.StatusInternalServerError, errBody("could not save chapter"))

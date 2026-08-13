@@ -150,11 +150,9 @@ type Chapter struct {
 	// PartyLevel/PartySize are the chapter's default expected party level and PC
 	// count; encounters inherit them unless overridden. nil means the chapter
 	// itself inherits from campaign settings. Raw override only — no resolution.
-	// nil is reachable at create, but chapter update only sets these when supplied
-	// (like Order), so it can't clear a set default back to inherit — an omitted
-	// field and explicit null both decode to a nil pointer. Clear-to-inherit is a
-	// Slice-3 concern (bd_521Studios-ncnq.3), unlike Encounter/CampaignSettings
-	// whose full-replace writes clear on omit.
+	// Full-replaced on update (like Encounter/CampaignSettings): a nil field
+	// clears the override back to inherit. Partial-update callers (the sidebar
+	// rename) must round-trip these or a rename would wipe them.
 	PartyLevel *int      `json:"party_level,omitempty"`
 	PartySize  *int      `json:"party_size,omitempty"`
 	CreatedAt  time.Time `json:"created_at"`
