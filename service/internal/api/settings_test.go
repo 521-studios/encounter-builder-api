@@ -141,9 +141,9 @@ func TestEncounter_PartyValidationRejects(t *testing.T) {
 	}
 }
 
-// A chapter's party defaults persist, and a rename ({"name":…}) must NOT wipe
-// them — the sidebar rename sends a partial body.
-func TestChapter_PartyDefaultsSurviveRename(t *testing.T) {
+// Chapter party defaults are full-replaced (like the encounter's): a
+// round-tripping update preserves them, and omitting them clears back to inherit.
+func TestChapter_PartyDefaultsFullReplace(t *testing.T) {
 	h, _ := newHandler(t, true, 0)
 	router := chapterRoutes(h)
 
@@ -154,11 +154,20 @@ func TestChapter_PartyDefaultsSurviveRename(t *testing.T) {
 		t.Fatalf("chapter party_level not persisted: %+v", ch)
 	}
 
-	rec = do(t, router, http.MethodPut, chPath+"/"+ch.ID, `{"name":"Ch renamed"}`)
+	// Round-trip (the frontend rename sends the current party fields) preserves.
+	rec = do(t, router, http.MethodPut, chPath+"/"+ch.ID, `{"name":"Ch renamed","party_level":4,"party_size":4}`)
 	var renamed model.Chapter
 	_ = json.Unmarshal(rec.Body.Bytes(), &renamed)
 	if renamed.Name != "Ch renamed" || renamed.PartyLevel == nil || *renamed.PartyLevel != 4 {
-		t.Fatalf("rename wiped party defaults: %+v", renamed)
+		t.Fatalf("round-trip update lost party defaults: %+v", renamed)
+	}
+
+	// Omitting the party fields clears the override back to inherit (full-replace).
+	rec = do(t, router, http.MethodPut, chPath+"/"+ch.ID, `{"name":"Ch"}`)
+	var cleared model.Chapter
+	_ = json.Unmarshal(rec.Body.Bytes(), &cleared)
+	if cleared.PartyLevel != nil || cleared.PartySize != nil {
+		t.Fatalf("omitting party fields should clear to inherit, got %+v", cleared)
 	}
 }
 
@@ -172,8 +181,9 @@ func TestChapter_PartyValidationRejects(t *testing.T) {
 	}
 }
 
-// The set/change branch of updateChapter: supplying party fields on a PUT applies
-// them (the complement of TestChapter_PartyDefaultsSurviveRename's omit path).
+// The set-from-nil branch of updateChapter: supplying party fields on a PUT to a
+// fresh chapter applies them (complements TestChapter_PartyDefaultsFullReplace's
+// round-trip-preserve and omit-clear paths).
 func TestChapter_UpdateSetsPartyDefaults(t *testing.T) {
 	h, _ := newHandler(t, true, 0)
 	router := chapterRoutes(h)
