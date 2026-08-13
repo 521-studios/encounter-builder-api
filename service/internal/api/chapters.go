@@ -33,6 +33,8 @@ func (h *handler) createChapter(w http.ResponseWriter, r *http.Request) {
 	if in.Order != nil {
 		ch.Order = *in.Order
 	}
+	ch.PartyLevel = in.PartyLevel
+	ch.PartySize = in.PartySize
 	if err := h.cfg.Store.PutChapter(r.Context(), ch); err != nil {
 		writeJSON(w, http.StatusInternalServerError, errBody("could not save chapter"))
 		return
@@ -67,6 +69,16 @@ func (h *handler) updateChapter(w http.ResponseWriter, r *http.Request) {
 	ch.Name = in.Name
 	if in.Order != nil {
 		ch.Order = *in.Order
+	}
+	// Party defaults, like order, are only touched when supplied — so the sidebar
+	// rename ({"name":…}) can't wipe a chapter's expected-party settings. (The
+	// encounter editor sends full state and thus overwrites; chapters get partial
+	// updates. Clearing a chapter default back to inherit is a Slice-3 concern.)
+	if in.PartyLevel != nil {
+		ch.PartyLevel = in.PartyLevel
+	}
+	if in.PartySize != nil {
+		ch.PartySize = in.PartySize
 	}
 	ch.UpdatedAt = time.Now().UTC()
 	if err := h.cfg.Store.PutChapter(r.Context(), ch); err != nil {

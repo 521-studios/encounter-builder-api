@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -241,5 +242,40 @@ func TestStore_Delete(t *testing.T) {
 	}
 	if _, err := st.Get(ctx, e.CampaignID, e.ID); err != ErrNotFound {
 		t.Fatalf("after delete, Get err = %v, want ErrNotFound", err)
+	}
+}
+
+// Settings are a per-campaign singleton: PutSettings then GetSettings round-trips,
+// GetSettings returns ErrNotFound when none saved, and the settings item does not
+// leak into encounter/chapter list Queries (it isn't a prefixed range key).
+func TestStore_SettingsRoundTripAndNotFound(t *testing.T) {
+	fake := newFake()
+	st := New(fake, "test-table")
+	ctx := context.Background()
+
+	if _, err := st.GetSettings(ctx, "g1"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("GetSettings unset = %v, want ErrNotFound", err)
+	}
+
+	lvl, size := 7, 5
+	if err := st.PutSettings(ctx, model.CampaignSettings{CampaignID: "g1", PartyLevel: &lvl, PartySize: &size}); err != nil {
+		t.Fatalf("PutSettings: %v", err)
+	}
+	got, err := st.GetSettings(ctx, "g1")
+	if err != nil {
+		t.Fatalf("GetSettings: %v", err)
+	}
+	if got.PartyLevel == nil || *got.PartyLevel != 7 || got.PartySize == nil || *got.PartySize != 5 {
+		t.Fatalf("settings round-trip = %+v, want level 7 size 5", got)
+	}
+
+	// The singleton must not surface in encounter/chapter lists.
+	encs, err := st.List(ctx, "g1")
+	if err != nil || len(encs) != 0 {
+		t.Fatalf("List picked up the settings item: len=%d err=%v", len(encs), err)
+	}
+	chs, err := st.ListChapters(ctx, "g1")
+	if err != nil || len(chs) != 0 {
+		t.Fatalf("ListChapters picked up the settings item: len=%d err=%v", len(chs), err)
 	}
 }

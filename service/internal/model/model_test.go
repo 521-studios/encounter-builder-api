@@ -31,6 +31,28 @@ func TestEncounterInput_Validate(t *testing.T) {
 	}
 }
 
+func TestValidateParty_Boundaries(t *testing.T) {
+	p := func(n int) *int { return &n }
+	cases := map[string]struct {
+		level, size *int
+		wantErr     bool
+	}{
+		"both nil (inherit)": {nil, nil, false},
+		"level 1 ok":         {p(1), nil, false},
+		"level 20 ok":        {p(20), nil, false},
+		"level 0":            {p(0), nil, true},
+		"level 21":           {p(21), nil, true},
+		"size 1 ok":          {nil, p(1), false},
+		"size 0":             {nil, p(0), true},
+		"both set ok":        {p(5), p(4), false},
+	}
+	for name, tc := range cases {
+		if err := validateParty(tc.level, tc.size); (err != nil) != tc.wantErr {
+			t.Errorf("%s: err=%v, wantErr=%v", name, err, tc.wantErr)
+		}
+	}
+}
+
 func TestEncounterInput_ValidateNormalizesEnums(t *testing.T) {
 	in := EncounterInput{
 		Name:     "x",
