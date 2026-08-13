@@ -181,8 +181,9 @@ func TestChapter_PartyValidationRejects(t *testing.T) {
 	}
 }
 
-// The set/change branch of updateChapter: supplying party fields on a PUT applies
-// them (the complement of TestChapter_PartyDefaultsSurviveRename's omit path).
+// The set-from-nil branch of updateChapter: supplying party fields on a PUT to a
+// fresh chapter applies them (complements TestChapter_PartyDefaultsFullReplace's
+// round-trip-preserve and omit-clear paths).
 func TestChapter_UpdateSetsPartyDefaults(t *testing.T) {
 	h, _ := newHandler(t, true, 0)
 	router := chapterRoutes(h)

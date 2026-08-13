@@ -51,8 +51,12 @@ func (h *handler) listChapters(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, list)
 }
 
-// updateChapter renames and/or reorders a chapter (both drive the sidebar).
-// Order is only touched when supplied, so a rename can't accidentally reset it.
+// updateChapter renames and/or reorders a chapter (both drive the sidebar), and
+// sets its expected-party defaults. Per-field update semantics differ by design:
+// Order is touch-only-when-supplied (omit = unchanged) for rename back-compat,
+// while PartyLevel/PartySize are full-replaced (omit = clear-to-inherit) to match
+// the encounter + settings writes — so partial callers MUST round-trip the party
+// fields (see the block comment below).
 func (h *handler) updateChapter(w http.ResponseWriter, r *http.Request) {
 	ch, ok := h.loadChapter(w, r)
 	if !ok {
