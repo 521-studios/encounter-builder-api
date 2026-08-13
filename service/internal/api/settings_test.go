@@ -161,3 +161,46 @@ func TestChapter_PartyDefaultsSurviveRename(t *testing.T) {
 		t.Fatalf("rename wiped party defaults: %+v", renamed)
 	}
 }
+
+// Chapter party validation is enforced at the HTTP boundary too (ChapterInput
+// routes through validateParty), not just in the unit test.
+func TestChapter_PartyValidationRejects(t *testing.T) {
+	h, _ := newHandler(t, true, 0)
+	rec := do(t, chapterRoutes(h), http.MethodPost, chPath, `{"name":"bad","party_level":99}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("out-of-range chapter party_level = %d, want 400", rec.Code)
+	}
+}
+
+// The set/change branch of updateChapter: supplying party fields on a PUT applies
+// them (the complement of TestChapter_PartyDefaultsSurviveRename's omit path).
+func TestChapter_UpdateSetsPartyDefaults(t *testing.T) {
+	h, _ := newHandler(t, true, 0)
+	router := chapterRoutes(h)
+	rec := do(t, router, http.MethodPost, chPath, `{"name":"Ch"}`)
+	var ch model.Chapter
+	_ = json.Unmarshal(rec.Body.Bytes(), &ch)
+	if ch.PartyLevel != nil {
+		t.Fatalf("fresh chapter should have nil party_level, got %+v", ch)
+	}
+	rec = do(t, router, http.MethodPut, chPath+"/"+ch.ID, `{"name":"Ch","party_level":6,"party_size":3}`)
+	var up model.Chapter
+	_ = json.Unmarshal(rec.Body.Bytes(), &up)
+	if up.PartyLevel == nil || *up.PartyLevel != 6 || up.PartySize == nil || *up.PartySize != 3 {
+		t.Fatalf("update did not set party defaults: %+v", up)
+	}
+}
+
+// Settings PUT is a full replace: omitting a field clears it back to nil (unlike
+// chapter update). Confirms the documented clear-on-omit semantics.
+func TestSettings_PutClearsOmittedField(t *testing.T) {
+	h, _ := newHandler(t, true, 0)
+	router := settingsRoutes(h)
+	do(t, router, http.MethodPut, setPath, `{"party_level":5,"party_size":4}`)
+	rec := do(t, router, http.MethodPut, setPath, `{"party_level":5}`)
+	var cs model.CampaignSettings
+	_ = json.Unmarshal(rec.Body.Bytes(), &cs)
+	if cs.PartyLevel == nil || *cs.PartyLevel != 5 || cs.PartySize != nil {
+		t.Fatalf("PUT should clear omitted party_size, got %+v", cs)
+	}
+}
