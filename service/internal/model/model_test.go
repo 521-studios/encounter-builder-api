@@ -31,6 +31,18 @@ func TestEncounterInput_Validate(t *testing.T) {
 			EncounterInput{Name: "x", TreasurePools: []TreasurePool{{ID: "p1", Gate: &Gate{Skill: "Perception", DC: -1}}}},
 			true,
 		},
+		"pool gate no skill": {
+			EncounterInput{Name: "x", TreasurePools: []TreasurePool{{ID: "p1", Gate: &Gate{DC: 5}}}},
+			true,
+		},
+		"value_tiers empty (no tier set)": {
+			EncounterInput{Name: "x", Treasure: []TreasureLine{{Ref: pristine, Qty: 1, ValueTiers: &ValueTiers{}}}},
+			true,
+		},
+		"identify_dc negative": {
+			EncounterInput{Name: "x", Treasure: []TreasureLine{{Ref: pristine, Qty: 1, IdentifyDC: -1}}},
+			true,
+		},
 		"pools + value_tiers ok": {
 			EncounterInput{
 				Name:          "x",

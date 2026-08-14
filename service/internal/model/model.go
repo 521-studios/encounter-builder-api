@@ -80,8 +80,9 @@ type Gate struct {
 
 // ValueTiers is a treasure line whose realized gp value depends on a skill check's
 // degree of success (AV B9's harvested gear: 40 gp on success, 20 on failure, 0 on
-// critical failure). Values are in copper; a nil tier is unset. The builder budgets
-// the best case (success); Party Treasure records the actual rolled outcome.
+// critical failure). Values are in copper; a nil tier is unset (at least one must be
+// set). The builder budgets the Success tier; Party Treasure records the actual
+// rolled outcome.
 type ValueTiers struct {
 	CritSuccess *int `json:"crit_success,omitempty"`
 	Success     *int `json:"success,omitempty"`
@@ -106,7 +107,7 @@ type TreasureLine struct {
 	// chapter_id renders under "Unsorted" — so deleting a pool never orphans loot.
 	PoolID string `json:"pool_id,omitempty"`
 	// ValueTiers, when set, overrides the item's price with a degree-of-success
-	// value (harvest/extraction checks). The builder budgets the best case.
+	// value (harvest/extraction checks).
 	ValueTiers *ValueTiers `json:"value_tiers,omitempty"`
 	// Variant is the chosen entry of an item's stat_block.variants, by NAME
 	// (e.g. "Striking (Greater)") — stable across data changes, unlike an index.
@@ -302,11 +303,21 @@ func (in *EncounterInput) Validate() error {
 		} else if !validTreasureStates[t.State] {
 			return fmt.Errorf("treasure[%d]: invalid state %q", i, t.State)
 		}
+		if t.IdentifyDC < 0 {
+			return fmt.Errorf("treasure[%d]: identify_dc must be >= 0", i)
+		}
 		if v := t.ValueTiers; v != nil {
+			anySet := false
 			for _, tier := range []*int{v.CritSuccess, v.Success, v.Failure, v.CritFailure} {
-				if tier != nil && *tier < 0 {
-					return fmt.Errorf("treasure[%d]: value_tiers amounts must be >= 0", i)
+				if tier != nil {
+					anySet = true
+					if *tier < 0 {
+						return fmt.Errorf("treasure[%d]: value_tiers amounts must be >= 0", i)
+					}
 				}
+			}
+			if !anySet {
+				return fmt.Errorf("treasure[%d]: value_tiers must set at least one tier", i)
 			}
 		}
 		// PoolID is intentionally not validated against TreasurePools — a dangling
@@ -317,8 +328,15 @@ func (in *EncounterInput) Validate() error {
 		if p.ID == "" {
 			return fmt.Errorf("treasure_pool[%d]: id is required", i)
 		}
-		if p.Gate != nil && p.Gate.DC < 0 {
-			return fmt.Errorf("treasure_pool[%d]: gate dc must be >= 0", i)
+		// A present gate is a real discovery check — reject an empty {} that would
+		// round-trip as a gate on no skill at DC 0 (indistinguishable from ungated).
+		if g := p.Gate; g != nil {
+			if g.Skill == "" {
+				return fmt.Errorf("treasure_pool[%d]: gate requires a skill", i)
+			}
+			if g.DC < 1 {
+				return fmt.Errorf("treasure_pool[%d]: gate dc must be >= 1", i)
+			}
 		}
 	}
 	for _, c := range []int{in.Currency.CP, in.Currency.SP, in.Currency.GP, in.Currency.PP} {

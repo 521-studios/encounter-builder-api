@@ -287,6 +287,39 @@ func TestCreate_PreservesTreasurePoolsAndValueTiers(t *testing.T) {
 	}
 }
 
+func TestUpdate_PreservesTreasurePoolsAndValueTiers(t *testing.T) {
+	h, _ := newHandler(t, true, 0)
+	router := campaignRoutes(h)
+
+	rec := do(t, router, http.MethodPost, encPath, `{"name":"x"}`)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create = %d, want 201; body=%s", rec.Code, rec.Body)
+	}
+	var created model.Encounter
+	_ = json.Unmarshal(rec.Body.Bytes(), &created)
+
+	// A routine edit (PUT) must carry treasure_pools + per-line value_tiers, not
+	// silently wipe them.
+	body := `{"name":"x",
+		"treasure_pools":[{"id":"p1","name":"altar","description":"# hidden","gate":{"skill":"Perception","dc":18}}],
+		"treasure":[{"qty":1,"ref":{"game_id":"g"},"pool_id":"p1","value_tiers":{"success":4000,"crit_failure":0}}]}`
+	rec = do(t, router, http.MethodPut, encPath+"/"+created.ID, body)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("update = %d, want 200; body=%s", rec.Code, rec.Body)
+	}
+	var enc model.Encounter
+	_ = json.Unmarshal(rec.Body.Bytes(), &enc)
+	if len(enc.TreasurePools) != 1 || enc.TreasurePools[0].ID != "p1" ||
+		enc.TreasurePools[0].Description != "# hidden" {
+		t.Fatalf("update wiped treasure pools: %+v", enc.TreasurePools)
+	}
+	tl := enc.Treasure[0]
+	if tl.PoolID != "p1" || tl.ValueTiers == nil ||
+		tl.ValueTiers.Success == nil || *tl.ValueTiers.Success != 4000 {
+		t.Fatalf("update wiped pool_id/value_tiers: %+v", tl)
+	}
+}
+
 func TestDecodeBody_Rejects400(t *testing.T) {
 	h, _ := newHandler(t, true, 0)
 	router := campaignRoutes(h)
