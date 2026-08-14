@@ -7,6 +7,7 @@ import (
 
 func TestEncounterInput_Validate(t *testing.T) {
 	pristine := ContentRef{GameID: "abc"}
+	ip := func(n int) *int { return &n }
 	cases := map[string]struct {
 		in      EncounterInput
 		wantErr bool
@@ -21,6 +22,27 @@ func TestEncounterInput_Validate(t *testing.T) {
 		"bad sale_class":    {EncounterInput{Name: "x", Treasure: []TreasureLine{{Ref: pristine, Qty: 1, SaleClass: "junk"}}}, true},
 		"bad state":         {EncounterInput{Name: "x", Treasure: []TreasureLine{{Ref: pristine, Qty: 1, State: "vaporized"}}}, true},
 		"negative currency": {EncounterInput{Name: "x", Currency: Currency{GP: -1}}, true},
+		"value_tiers negative": {
+			EncounterInput{Name: "x", Treasure: []TreasureLine{{Ref: pristine, Qty: 1, ValueTiers: &ValueTiers{Success: ip(-1)}}}},
+			true,
+		},
+		"pool missing id": {EncounterInput{Name: "x", TreasurePools: []TreasurePool{{Name: "altar"}}}, true},
+		"pool gate negative dc": {
+			EncounterInput{Name: "x", TreasurePools: []TreasurePool{{ID: "p1", Gate: &Gate{Skill: "Perception", DC: -1}}}},
+			true,
+		},
+		"pools + value_tiers ok": {
+			EncounterInput{
+				Name:          "x",
+				TreasurePools: []TreasurePool{{ID: "p1", Name: "altar", Description: "# hidden", Gate: &Gate{Skill: "Perception", DC: 18}}},
+				Treasure:      []TreasureLine{{Ref: pristine, Qty: 1, PoolID: "p1", ValueTiers: &ValueTiers{Success: ip(4000), Failure: ip(2000), CritFailure: ip(0)}}},
+			},
+			false,
+		},
+		"dangling pool_id is allowed (falls to default)": {
+			EncounterInput{Name: "x", Treasure: []TreasureLine{{Ref: pristine, Qty: 1, PoolID: "gone"}}},
+			false,
+		},
 	}
 	for name, tc := range cases {
 		in := tc.in
