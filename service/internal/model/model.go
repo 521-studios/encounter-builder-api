@@ -127,6 +127,16 @@ type TreasurePool struct {
 	Gate        *Gate  `json:"gate,omitempty"`
 }
 
+// XPAward is a flat, non-combat XP grant — a story/exploration/quest milestone
+// or an ally recruited (AV's "30 XP for gaining Augrael as an ally") — that
+// advances the party with no creature to fight. Amount is the XP; Reason is the
+// GM's label. Awards add to the encounter's XP total (and chapter rollups) but
+// NOT to its combat difficulty band or treasure budget, which stay creature-derived.
+type XPAward struct {
+	Amount int    `json:"amount"`
+	Reason string `json:"reason,omitempty"`
+}
+
 // Currency is the coin reward.
 type Currency struct {
 	CP int `json:"cp"`
@@ -166,6 +176,7 @@ type Encounter struct {
 	Monsters      []MonsterEntry `json:"monsters"`
 	Treasure      []TreasureLine `json:"treasure"`
 	TreasurePools []TreasurePool `json:"treasure_pools,omitempty"`
+	XPAwards      []XPAward      `json:"xp_awards,omitempty"`
 	Currency      Currency       `json:"currency"`
 	// PartyLevel/PartySize are the encounter's expected party level and PC count
 	// used for treasure/difficulty budgeting. nil means "inherit" — the client
@@ -254,6 +265,7 @@ type EncounterInput struct {
 	Monsters      []MonsterEntry `json:"monsters,omitempty"`
 	Treasure      []TreasureLine `json:"treasure,omitempty"`
 	TreasurePools []TreasurePool `json:"treasure_pools,omitempty"`
+	XPAwards      []XPAward      `json:"xp_awards,omitempty"`
 	Currency      Currency       `json:"currency"`
 	// PartyLevel/PartySize override the inherited expected-party values; nil
 	// leaves the encounter inheriting from its chapter/campaign.
@@ -337,6 +349,11 @@ func (in *EncounterInput) Validate() error {
 			if g.DC < 1 {
 				return fmt.Errorf("treasure_pool[%d]: gate dc must be >= 1", i)
 			}
+		}
+	}
+	for i := range in.XPAwards {
+		if in.XPAwards[i].Amount < 1 {
+			return fmt.Errorf("xp_award[%d]: amount must be >= 1", i)
 		}
 	}
 	for _, c := range []int{in.Currency.CP, in.Currency.SP, in.Currency.GP, in.Currency.PP} {
