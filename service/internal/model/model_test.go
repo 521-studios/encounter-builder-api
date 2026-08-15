@@ -67,6 +67,12 @@ func TestEncounterInput_Validate(t *testing.T) {
 			EncounterInput{Name: "x", Rewards: []Reward{{Kind: RewardItem, Label: "The Whispering Reeds", Description: "# a unique book"}}},
 			false,
 		},
+		"skill_check no skill": {EncounterInput{Name: "x", SkillChecks: []SkillCheck{{DC: 12}}}, true},
+		"skill_check dc 0":     {EncounterInput{Name: "x", SkillChecks: []SkillCheck{{Skill: "Perception"}}}, true},
+		"skill_check ok": {
+			EncounterInput{Name: "x", SkillChecks: []SkillCheck{{Skill: "Perception", DC: 12, Description: "spot the loose planks"}}},
+			false,
+		},
 	}
 	for name, tc := range cases {
 		in := tc.in
