@@ -137,6 +137,43 @@ type XPAward struct {
 	Reason string `json:"reason,omitempty"`
 }
 
+// RoomType classifies an area beyond combat. Modules are full of rooms that are
+// hazards, haunts, exploration/skill challenges, social scenes, pure-knowledge
+// rooms, or empty — for which the combat difficulty band is meaningless. Default
+// is combat (the builder's original unit).
+type RoomType string
+
+const (
+	RoomCombat      RoomType = "combat"
+	RoomHazard      RoomType = "hazard"
+	RoomHaunt       RoomType = "haunt"
+	RoomExploration RoomType = "exploration"
+	RoomSocial      RoomType = "social"
+	RoomKnowledge   RoomType = "knowledge"
+	RoomEmpty       RoomType = "empty"
+)
+
+// RewardKind types a non-treasure reward slot: information/lore unlocked, a ritual
+// granted, an ally recruited, or a unique narrative item. Distinct from valued
+// treasure (which feeds the budget) — these are informational GM records with no
+// gp/XP effect.
+type RewardKind string
+
+const (
+	RewardInformation RewardKind = "information"
+	RewardRitual      RewardKind = "ritual"
+	RewardAlly        RewardKind = "ally"
+	RewardItem        RewardKind = "item"
+)
+
+// Reward is one non-treasure reward a room grants. Label is a short name;
+// Description is GM-authored markdown.
+type Reward struct {
+	Kind        RewardKind `json:"kind"`
+	Label       string     `json:"label"`
+	Description string     `json:"description,omitempty"`
+}
+
 // Currency is the coin reward.
 type Currency struct {
 	CP int `json:"cp"`
@@ -177,6 +214,8 @@ type Encounter struct {
 	Treasure      []TreasureLine `json:"treasure"`
 	TreasurePools []TreasurePool `json:"treasure_pools,omitempty"`
 	XPAwards      []XPAward      `json:"xp_awards,omitempty"`
+	RoomType      RoomType       `json:"room_type,omitempty"`
+	Rewards       []Reward       `json:"rewards,omitempty"`
 	Currency      Currency       `json:"currency"`
 	// PartyLevel/PartySize are the encounter's expected party level and PC count
 	// used for treasure/difficulty budgeting. nil means "inherit" — the client
@@ -252,6 +291,13 @@ func (in CampaignSettingsInput) Validate() error {
 var validAdjustments = map[Adjustment]bool{AdjustmentNone: true, AdjustmentElite: true, AdjustmentWeak: true}
 var validSaleClasses = map[SaleClass]bool{SaleNormal: true, SalePureTreasure: true}
 var validTreasureStates = map[TreasureState]bool{TreasureIntact: true, TreasureConsumed: true, TreasureDestroyed: true}
+var validRoomTypes = map[RoomType]bool{
+	RoomCombat: true, RoomHazard: true, RoomHaunt: true, RoomExploration: true,
+	RoomSocial: true, RoomKnowledge: true, RoomEmpty: true,
+}
+var validRewardKinds = map[RewardKind]bool{
+	RewardInformation: true, RewardRitual: true, RewardAlly: true, RewardItem: true,
+}
 
 // EncounterInput is the client-writable shape for create/update. Keeping it
 // separate from Encounter is the invariant: server-owned fields (id, campaign,
@@ -266,6 +312,8 @@ type EncounterInput struct {
 	Treasure      []TreasureLine `json:"treasure,omitempty"`
 	TreasurePools []TreasurePool `json:"treasure_pools,omitempty"`
 	XPAwards      []XPAward      `json:"xp_awards,omitempty"`
+	RoomType      RoomType       `json:"room_type,omitempty"`
+	Rewards       []Reward       `json:"rewards,omitempty"`
 	Currency      Currency       `json:"currency"`
 	// PartyLevel/PartySize override the inherited expected-party values; nil
 	// leaves the encounter inheriting from its chapter/campaign.
@@ -354,6 +402,23 @@ func (in *EncounterInput) Validate() error {
 	for i := range in.XPAwards {
 		if in.XPAwards[i].Amount < 1 {
 			return fmt.Errorf("xp_award[%d]: amount must be >= 1", i)
+		}
+	}
+	if in.RoomType == "" {
+		in.RoomType = RoomCombat
+	} else if !validRoomTypes[in.RoomType] {
+		return fmt.Errorf("invalid room_type %q", in.RoomType)
+	}
+	for i := range in.Rewards {
+		r := &in.Rewards[i]
+		if r.Kind == "" {
+			return fmt.Errorf("reward[%d]: kind is required", i)
+		}
+		if !validRewardKinds[r.Kind] {
+			return fmt.Errorf("reward[%d]: invalid kind %q", i, r.Kind)
+		}
+		if r.Label == "" {
+			return fmt.Errorf("reward[%d]: label is required", i)
 		}
 	}
 	for _, c := range []int{in.Currency.CP, in.Currency.SP, in.Currency.GP, in.Currency.PP} {
