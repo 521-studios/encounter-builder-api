@@ -55,6 +55,9 @@ func TestEncounterInput_Validate(t *testing.T) {
 			EncounterInput{Name: "x", Treasure: []TreasureLine{{Ref: pristine, Qty: 1, PoolID: "gone"}}},
 			false,
 		},
+		"xp_award amount 0": {EncounterInput{Name: "x", XPAwards: []XPAward{{Reason: "ally"}}}, true},
+		"xp_award negative": {EncounterInput{Name: "x", XPAwards: []XPAward{{Amount: -5}}}, true},
+		"xp_award ok":       {EncounterInput{Name: "x", XPAwards: []XPAward{{Amount: 30, Reason: "gained Augrael as an ally"}}}, false},
 	}
 	for name, tc := range cases {
 		in := tc.in

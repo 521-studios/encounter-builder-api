@@ -166,6 +166,44 @@ func TestCreate_ThenGetAndList(t *testing.T) {
 	}
 }
 
+func TestCreate_PersistsXPAwards(t *testing.T) {
+	h, _ := newHandler(t, true, 0)
+	router := campaignRoutes(h)
+
+	body := `{"name":"Visitor's Reading Room","xp_awards":[{"amount":30,"reason":"gained Augrael as an ally"}]}`
+	rec := do(t, router, http.MethodPost, encPath, body)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create = %d, want 201; body=%s", rec.Code, rec.Body)
+	}
+	var created model.Encounter
+	_ = json.Unmarshal(rec.Body.Bytes(), &created)
+
+	rec = do(t, router, http.MethodGet, encPath+"/"+created.ID, "")
+	var got model.Encounter
+	_ = json.Unmarshal(rec.Body.Bytes(), &got)
+	if len(got.XPAwards) != 1 || got.XPAwards[0].Amount != 30 || got.XPAwards[0].Reason != "gained Augrael as an ally" {
+		t.Fatalf("xp_awards round-trip wrong: %+v", got.XPAwards)
+	}
+
+	// A routine edit (PUT) must carry xp_awards, not silently wipe them.
+	rec = do(t, router, http.MethodPut, encPath+"/"+created.ID,
+		`{"name":"Visitor's Reading Room","xp_awards":[{"amount":45,"reason":"quest milestone"}]}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("update = %d, want 200; body=%s", rec.Code, rec.Body)
+	}
+	var updated model.Encounter
+	_ = json.Unmarshal(rec.Body.Bytes(), &updated)
+	if len(updated.XPAwards) != 1 || updated.XPAwards[0].Amount != 45 || updated.XPAwards[0].Reason != "quest milestone" {
+		t.Fatalf("update wiped/dropped xp_awards: %+v", updated.XPAwards)
+	}
+
+	// amount < 1 is rejected
+	rec = do(t, router, http.MethodPost, encPath, `{"name":"x","xp_awards":[{"reason":"no amount"}]}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("zero-amount award = %d, want 400", rec.Code)
+	}
+}
+
 func TestCreate_ValidationRejects(t *testing.T) {
 	h, _ := newHandler(t, true, 0)
 	// missing name
