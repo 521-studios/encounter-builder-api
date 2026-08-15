@@ -204,6 +204,50 @@ func TestCreate_PersistsXPAwards(t *testing.T) {
 	}
 }
 
+func TestCreate_PersistsRoomTypeAndRewards(t *testing.T) {
+	h, _ := newHandler(t, true, 0)
+	router := campaignRoutes(h)
+
+	body := `{"name":"Secure Collection","room_type":"knowledge",
+		"rewards":[{"kind":"information","label":"Belcorra's history","description":"# lore"},
+		           {"kind":"item","label":"The Whispering Reeds"}]}`
+	rec := do(t, router, http.MethodPost, encPath, body)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create = %d, want 201; body=%s", rec.Code, rec.Body)
+	}
+	var created model.Encounter
+	_ = json.Unmarshal(rec.Body.Bytes(), &created)
+	if created.RoomType != model.RoomKnowledge || len(created.Rewards) != 2 {
+		t.Fatalf("room_type/rewards not stored: %+v", created)
+	}
+
+	// A default (no room_type) create normalizes to combat.
+	rec = do(t, router, http.MethodPost, encPath, `{"name":"Fight"}`)
+	var plain model.Encounter
+	_ = json.Unmarshal(rec.Body.Bytes(), &plain)
+	if plain.RoomType != model.RoomCombat {
+		t.Fatalf("default room_type = %q, want combat", plain.RoomType)
+	}
+
+	// A routine edit (PUT) must carry room_type + rewards, not wipe them.
+	rec = do(t, router, http.MethodPut, encPath+"/"+created.ID,
+		`{"name":"Secure Collection","room_type":"social","rewards":[{"kind":"ally","label":"Augrael"}]}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("update = %d, want 200; body=%s", rec.Code, rec.Body)
+	}
+	var updated model.Encounter
+	_ = json.Unmarshal(rec.Body.Bytes(), &updated)
+	if updated.RoomType != model.RoomSocial || len(updated.Rewards) != 1 || updated.Rewards[0].Kind != model.RewardAlly {
+		t.Fatalf("update wiped/dropped room_type/rewards: %+v", updated)
+	}
+
+	// A reward with no label is rejected.
+	rec = do(t, router, http.MethodPost, encPath, `{"name":"x","rewards":[{"kind":"information"}]}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("labelless reward = %d, want 400", rec.Code)
+	}
+}
+
 func TestCreate_ValidationRejects(t *testing.T) {
 	h, _ := newHandler(t, true, 0)
 	// missing name

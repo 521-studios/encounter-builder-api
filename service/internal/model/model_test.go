@@ -58,6 +58,14 @@ func TestEncounterInput_Validate(t *testing.T) {
 		"xp_award amount 0": {EncounterInput{Name: "x", XPAwards: []XPAward{{Reason: "ally"}}}, true},
 		"xp_award negative": {EncounterInput{Name: "x", XPAwards: []XPAward{{Amount: -5}}}, true},
 		"xp_award ok":       {EncounterInput{Name: "x", XPAwards: []XPAward{{Amount: 30, Reason: "gained Augrael as an ally"}}}, false},
+		"bad room_type":     {EncounterInput{Name: "x", RoomType: "dungeon"}, true},
+		"room_type ok":      {EncounterInput{Name: "x", RoomType: RoomKnowledge}, false},
+		"reward bad kind":   {EncounterInput{Name: "x", Rewards: []Reward{{Kind: "xp", Label: "lore"}}}, true},
+		"reward no label":   {EncounterInput{Name: "x", Rewards: []Reward{{Kind: RewardInformation}}}, true},
+		"reward ok": {
+			EncounterInput{Name: "x", Rewards: []Reward{{Kind: RewardItem, Label: "The Whispering Reeds", Description: "# a unique book"}}},
+			false,
+		},
 	}
 	for name, tc := range cases {
 		in := tc.in
@@ -104,6 +112,9 @@ func TestEncounterInput_ValidateNormalizesEnums(t *testing.T) {
 	}
 	if in.Treasure[0].SaleClass != SaleNormal || in.Treasure[0].State != TreasureIntact {
 		t.Errorf("treasure enums = %q/%q, want normal/intact", in.Treasure[0].SaleClass, in.Treasure[0].State)
+	}
+	if in.RoomType != RoomCombat {
+		t.Errorf("room_type = %q, want combat (default)", in.RoomType)
 	}
 }
 
