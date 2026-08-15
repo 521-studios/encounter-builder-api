@@ -73,6 +73,9 @@ func TestEncounterInput_Validate(t *testing.T) {
 			EncounterInput{Name: "x", SkillChecks: []SkillCheck{{Skill: "Perception", DC: 12, Description: "spot the loose planks"}}},
 			false,
 		},
+		"exit empty":        {EncounterInput{Name: "x", Exits: []Exit{{}}}, true},
+		"exit to target ok": {EncounterInput{Name: "x", Exits: []Exit{{ToEncounterID: "enc-a2"}}}, false},
+		"exit external ok":  {EncounterInput{Name: "x", Exits: []Exit{{Label: "Exterior"}}}, false},
 	}
 	for name, tc := range cases {
 		in := tc.in

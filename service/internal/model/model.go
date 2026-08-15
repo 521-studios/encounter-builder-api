@@ -183,6 +183,16 @@ type SkillCheck struct {
 	Description string `json:"description,omitempty"`
 }
 
+// Exit is one edge of the dungeon connectivity graph — a passage from this room to
+// another encounter (ToEncounterID, a SOFT reference like ChapterID: not validated
+// against existing encounters, so deleting a room never breaks a link) or to an
+// external/unlisted destination named only by Label ("Exterior", "stairs up").
+// Directed as modules list them per-room; the map view renders the graph.
+type Exit struct {
+	ToEncounterID string `json:"to_encounter_id,omitempty"`
+	Label         string `json:"label,omitempty"`
+}
+
 // Currency is the coin reward.
 type Currency struct {
 	CP int `json:"cp"`
@@ -226,6 +236,7 @@ type Encounter struct {
 	RoomType      RoomType       `json:"room_type,omitempty"`
 	Rewards       []Reward       `json:"rewards,omitempty"`
 	SkillChecks   []SkillCheck   `json:"skill_checks,omitempty"`
+	Exits         []Exit         `json:"exits,omitempty"`
 	Currency      Currency       `json:"currency"`
 	// PartyLevel/PartySize are the encounter's expected party level and PC count
 	// used for treasure/difficulty budgeting. nil means "inherit" — the client
@@ -325,6 +336,7 @@ type EncounterInput struct {
 	RoomType      RoomType       `json:"room_type,omitempty"`
 	Rewards       []Reward       `json:"rewards,omitempty"`
 	SkillChecks   []SkillCheck   `json:"skill_checks,omitempty"`
+	Exits         []Exit         `json:"exits,omitempty"`
 	Currency      Currency       `json:"currency"`
 	// PartyLevel/PartySize override the inherited expected-party values; nil
 	// leaves the encounter inheriting from its chapter/campaign.
@@ -439,6 +451,12 @@ func (in *EncounterInput) Validate() error {
 		}
 		if s.DC < 1 {
 			return fmt.Errorf("skill_check[%d]: dc must be >= 1", i)
+		}
+	}
+	for i := range in.Exits {
+		e := &in.Exits[i]
+		if e.ToEncounterID == "" && e.Label == "" {
+			return fmt.Errorf("exit[%d]: needs a target encounter or a label", i)
 		}
 	}
 	for _, c := range []int{in.Currency.CP, in.Currency.SP, in.Currency.GP, in.Currency.PP} {
