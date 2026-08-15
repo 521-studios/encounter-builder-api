@@ -282,6 +282,39 @@ func TestCreate_PersistsSkillChecks(t *testing.T) {
 	}
 }
 
+func TestCreate_PersistsExits(t *testing.T) {
+	h, _ := newHandler(t, true, 0)
+	router := campaignRoutes(h)
+
+	body := `{"name":"A1","exits":[{"to_encounter_id":"enc-a2","label":"north door"},{"label":"Exterior"}]}`
+	rec := do(t, router, http.MethodPost, encPath, body)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create = %d, want 201; body=%s", rec.Code, rec.Body)
+	}
+	var created model.Encounter
+	_ = json.Unmarshal(rec.Body.Bytes(), &created)
+	if len(created.Exits) != 2 || created.Exits[0].ToEncounterID != "enc-a2" || created.Exits[1].Label != "Exterior" {
+		t.Fatalf("exits not stored: %+v", created.Exits)
+	}
+
+	// A routine edit (PUT) must carry exits, not wipe them.
+	rec = do(t, router, http.MethodPut, encPath+"/"+created.ID, `{"name":"A1","exits":[{"to_encounter_id":"enc-a3"}]}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("update = %d, want 200; body=%s", rec.Code, rec.Body)
+	}
+	var updated model.Encounter
+	_ = json.Unmarshal(rec.Body.Bytes(), &updated)
+	if len(updated.Exits) != 1 || updated.Exits[0].ToEncounterID != "enc-a3" {
+		t.Fatalf("update wiped/dropped exits: %+v", updated.Exits)
+	}
+
+	// An entirely-empty exit (no target, no label) is rejected.
+	rec = do(t, router, http.MethodPost, encPath, `{"name":"x","exits":[{}]}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("empty exit = %d, want 400", rec.Code)
+	}
+}
+
 func TestCreate_ValidationRejects(t *testing.T) {
 	h, _ := newHandler(t, true, 0)
 	// missing name
