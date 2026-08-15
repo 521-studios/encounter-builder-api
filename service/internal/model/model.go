@@ -174,6 +174,15 @@ type Reward struct {
 	Description string     `json:"description,omitempty"`
 }
 
+// SkillCheck is a structured discovery/skill entry a room carries (e.g. "DC 12
+// Perception to spot the loose planks"). Skill + DC make it surfaceable at the
+// table instead of buried in prose; Description is what it reveals/does (markdown).
+type SkillCheck struct {
+	Skill       string `json:"skill"`
+	DC          int    `json:"dc"`
+	Description string `json:"description,omitempty"`
+}
+
 // Currency is the coin reward.
 type Currency struct {
 	CP int `json:"cp"`
@@ -216,6 +225,7 @@ type Encounter struct {
 	XPAwards      []XPAward      `json:"xp_awards,omitempty"`
 	RoomType      RoomType       `json:"room_type,omitempty"`
 	Rewards       []Reward       `json:"rewards,omitempty"`
+	SkillChecks   []SkillCheck   `json:"skill_checks,omitempty"`
 	Currency      Currency       `json:"currency"`
 	// PartyLevel/PartySize are the encounter's expected party level and PC count
 	// used for treasure/difficulty budgeting. nil means "inherit" — the client
@@ -314,6 +324,7 @@ type EncounterInput struct {
 	XPAwards      []XPAward      `json:"xp_awards,omitempty"`
 	RoomType      RoomType       `json:"room_type,omitempty"`
 	Rewards       []Reward       `json:"rewards,omitempty"`
+	SkillChecks   []SkillCheck   `json:"skill_checks,omitempty"`
 	Currency      Currency       `json:"currency"`
 	// PartyLevel/PartySize override the inherited expected-party values; nil
 	// leaves the encounter inheriting from its chapter/campaign.
@@ -419,6 +430,15 @@ func (in *EncounterInput) Validate() error {
 		}
 		if r.Label == "" {
 			return fmt.Errorf("reward[%d]: label is required", i)
+		}
+	}
+	for i := range in.SkillChecks {
+		s := &in.SkillChecks[i]
+		if s.Skill == "" {
+			return fmt.Errorf("skill_check[%d]: skill is required", i)
+		}
+		if s.DC < 1 {
+			return fmt.Errorf("skill_check[%d]: dc must be >= 1", i)
 		}
 	}
 	for _, c := range []int{in.Currency.CP, in.Currency.SP, in.Currency.GP, in.Currency.PP} {

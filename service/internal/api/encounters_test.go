@@ -248,6 +248,40 @@ func TestCreate_PersistsRoomTypeAndRewards(t *testing.T) {
 	}
 }
 
+func TestCreate_PersistsSkillChecks(t *testing.T) {
+	h, _ := newHandler(t, true, 0)
+	router := campaignRoutes(h)
+
+	body := `{"name":"Planked floor","skill_checks":[{"skill":"Perception","dc":12,"description":"spot the loose planks"}]}`
+	rec := do(t, router, http.MethodPost, encPath, body)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create = %d, want 201; body=%s", rec.Code, rec.Body)
+	}
+	var created model.Encounter
+	_ = json.Unmarshal(rec.Body.Bytes(), &created)
+	if len(created.SkillChecks) != 1 || created.SkillChecks[0].Skill != "Perception" || created.SkillChecks[0].DC != 12 {
+		t.Fatalf("skill_checks not stored: %+v", created.SkillChecks)
+	}
+
+	// A routine edit (PUT) must carry skill_checks, not wipe them.
+	rec = do(t, router, http.MethodPut, encPath+"/"+created.ID,
+		`{"name":"Planked floor","skill_checks":[{"skill":"Nature","dc":15}]}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("update = %d, want 200; body=%s", rec.Code, rec.Body)
+	}
+	var updated model.Encounter
+	_ = json.Unmarshal(rec.Body.Bytes(), &updated)
+	if len(updated.SkillChecks) != 1 || updated.SkillChecks[0].Skill != "Nature" || updated.SkillChecks[0].DC != 15 {
+		t.Fatalf("update wiped/dropped skill_checks: %+v", updated.SkillChecks)
+	}
+
+	// A skill check with no skill / dc < 1 is rejected.
+	rec = do(t, router, http.MethodPost, encPath, `{"name":"x","skill_checks":[{"dc":10}]}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("skill-less check = %d, want 400", rec.Code)
+	}
+}
+
 func TestCreate_ValidationRejects(t *testing.T) {
 	h, _ := newHandler(t, true, 0)
 	// missing name
