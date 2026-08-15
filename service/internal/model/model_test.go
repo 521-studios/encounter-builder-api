@@ -61,6 +61,7 @@ func TestEncounterInput_Validate(t *testing.T) {
 		"bad room_type":     {EncounterInput{Name: "x", RoomType: "dungeon"}, true},
 		"room_type ok":      {EncounterInput{Name: "x", RoomType: RoomKnowledge}, false},
 		"reward bad kind":   {EncounterInput{Name: "x", Rewards: []Reward{{Kind: "xp", Label: "lore"}}}, true},
+		"reward no kind":    {EncounterInput{Name: "x", Rewards: []Reward{{Label: "lore"}}}, true},
 		"reward no label":   {EncounterInput{Name: "x", Rewards: []Reward{{Kind: RewardInformation}}}, true},
 		"reward ok": {
 			EncounterInput{Name: "x", Rewards: []Reward{{Kind: RewardItem, Label: "The Whispering Reeds", Description: "# a unique book"}}},

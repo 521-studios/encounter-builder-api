@@ -411,6 +411,9 @@ func (in *EncounterInput) Validate() error {
 	}
 	for i := range in.Rewards {
 		r := &in.Rewards[i]
+		if r.Kind == "" {
+			return fmt.Errorf("reward[%d]: kind is required", i)
+		}
 		if !validRewardKinds[r.Kind] {
 			return fmt.Errorf("reward[%d]: invalid kind %q", i, r.Kind)
 		}
