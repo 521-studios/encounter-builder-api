@@ -115,6 +115,8 @@ func TestEncounterInput_ValidateNormalizesEnums(t *testing.T) {
 	in := EncounterInput{
 		Name:     "x",
 		Monsters: []MonsterEntry{{Ref: ContentRef{GameID: "g"}, Count: 1}},
+		// A hazard never has elite/weak — a stray adjustment must be forced to none.
+		Hazards:  []MonsterEntry{{Ref: ContentRef{GameID: "h"}, Count: 1, Adjustment: "elite"}},
 		Treasure: []TreasureLine{{Ref: ContentRef{JSON: json.RawMessage(`{}`)}, Qty: 1}},
 	}
 	if err := in.Validate(); err != nil {
@@ -122,6 +124,9 @@ func TestEncounterInput_ValidateNormalizesEnums(t *testing.T) {
 	}
 	if in.Monsters[0].Adjustment != AdjustmentNone {
 		t.Errorf("adjustment = %q, want none", in.Monsters[0].Adjustment)
+	}
+	if in.Hazards[0].Adjustment != AdjustmentNone {
+		t.Errorf("hazard adjustment = %q, want none (forced)", in.Hazards[0].Adjustment)
 	}
 	if in.Treasure[0].SaleClass != SaleNormal || in.Treasure[0].State != TreasureIntact {
 		t.Errorf("treasure enums = %q/%q, want normal/intact", in.Treasure[0].SaleClass, in.Treasure[0].State)

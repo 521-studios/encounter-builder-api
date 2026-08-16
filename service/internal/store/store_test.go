@@ -65,6 +65,11 @@ func sampleEncounter() model.Encounter {
 			Count:      3,
 			Adjustment: model.AdjustmentWeak,
 		}},
+		Hazards: []model.MonsterEntry{{
+			Ref:      model.ContentRef{GameID: "Hazards:42"},
+			Count:    2,
+			Nickname: "Web Lurker Noose",
+		}},
 		Treasure: []model.TreasureLine{{
 			LineID:    "t1",
 			Ref:       model.ContentRef{JSON: json.RawMessage(`{"name":"fireball scroll"}`)},

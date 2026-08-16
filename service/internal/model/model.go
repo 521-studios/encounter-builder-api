@@ -380,9 +380,8 @@ func (in *EncounterInput) Validate() error {
 		if h.Ref.isEmpty() {
 			return fmt.Errorf("hazard[%d]: ref must reference content (game_id, base, or json)", i)
 		}
-		if h.Adjustment == "" {
-			h.Adjustment = AdjustmentNone
-		}
+		// A hazard has no elite/weak — force none so a stray adjustment can't persist.
+		h.Adjustment = AdjustmentNone
 	}
 	for i := range in.Treasure {
 		t := &in.Treasure[i]
