@@ -2,6 +2,7 @@
 
 ```json
 {
+  "bots": { "gemini": false },
   "defaults_version_checked": "1.3.0",
   "disabled": [
     "silent-failure-hunter",
