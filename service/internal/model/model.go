@@ -24,6 +24,11 @@ type ContentRef struct {
 	Base          *ContentRef       `json:"base,omitempty"`
 	Modifications []json.RawMessage `json:"modifications,omitempty"`
 	JSON          json.RawMessage   `json:"json,omitempty"`
+	// PriceCp is the composed copper price of a derived item (base + runes), computed
+	// by the builder and carried here so the treasure budget reads it directly. Opaque
+	// to the API — stored and round-tripped, not interpreted. Declared so the strict
+	// (DisallowUnknownFields) decoder accepts a priced composed ref.
+	PriceCp *int `json:"price_cp,omitempty"`
 }
 
 // isEmpty reports whether a ref names nothing — no pristine game_id, no custom

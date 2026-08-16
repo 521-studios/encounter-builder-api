@@ -483,6 +483,35 @@ func TestDecodeBody_Rejects400(t *testing.T) {
 }
 
 // TestCreate_V2FieldsAndTemplatedMonster covers the v2 additions: chapter_id +
+// A composed (runed) treasure item carries a computed copper total in ref.price_cp.
+// The request decoder is strict (DisallowUnknownFields), so ContentRef must declare
+// price_cp or the whole save 400s — and the value must round-trip for the budget.
+func TestCreate_ComposedTreasureCarriesPriceCp(t *testing.T) {
+	h, _ := newHandler(t, true, 0)
+	router := campaignRoutes(h)
+	body := `{
+		"name":"Loot",
+		"treasure":[{
+			"qty":1,
+			"ref":{
+				"base":{"game_id":"Weapons:1"},
+				"modifications":[{"effect_game_id":"Rune:striking","effect_name":"Striking","grade":4,"price_cp":6500}],
+				"json":{"name":"Striking Longsword"},
+				"price_cp":6600
+			}
+		}]
+	}`
+	rec := do(t, router, http.MethodPost, encPath, body)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create with a priced composed treasure ref = %d, want 201; body=%s", rec.Code, rec.Body)
+	}
+	var enc model.Encounter
+	_ = json.Unmarshal(rec.Body.Bytes(), &enc)
+	if len(enc.Treasure) != 1 || enc.Treasure[0].Ref.PriceCp == nil || *enc.Treasure[0].Ref.PriceCp != 6600 {
+		t.Fatalf("composed ref price_cp not round-tripped: %+v", enc.Treasure)
+	}
+}
+
 // markdown description round-trip, and a *templated* monster stored as a derived
 // ContentRef ({base, modifications, json}) — which needs no new model field and
 // must pass validation via the recursive isEmpty (base references content).
