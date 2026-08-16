@@ -230,6 +230,7 @@ type Encounter struct {
 	Description   string         `json:"description,omitempty"`
 	Notes         string         `json:"notes,omitempty"`
 	Monsters      []MonsterEntry `json:"monsters"`
+	Hazards       []MonsterEntry `json:"hazards,omitempty"`
 	Treasure      []TreasureLine `json:"treasure"`
 	TreasurePools []TreasurePool `json:"treasure_pools,omitempty"`
 	XPAwards      []XPAward      `json:"xp_awards,omitempty"`
@@ -330,6 +331,7 @@ type EncounterInput struct {
 	Description   string         `json:"description,omitempty"`
 	Notes         string         `json:"notes,omitempty"`
 	Monsters      []MonsterEntry `json:"monsters,omitempty"`
+	Hazards       []MonsterEntry `json:"hazards,omitempty"`
 	Treasure      []TreasureLine `json:"treasure,omitempty"`
 	TreasurePools []TreasurePool `json:"treasure_pools,omitempty"`
 	XPAwards      []XPAward      `json:"xp_awards,omitempty"`
@@ -367,6 +369,19 @@ func (in *EncounterInput) Validate() error {
 		} else if !validAdjustments[m.Adjustment] {
 			return fmt.Errorf("monster[%d]: invalid adjustment %q", i, m.Adjustment)
 		}
+	}
+	// Hazards reuse MonsterEntry (ref + count; a haunt/hazard has no elite/weak, so
+	// adjustment normalizes to none). Same ref/count invariants as monsters.
+	for i := range in.Hazards {
+		h := &in.Hazards[i]
+		if h.Count < 1 {
+			return fmt.Errorf("hazard[%d]: count must be >= 1", i)
+		}
+		if h.Ref.isEmpty() {
+			return fmt.Errorf("hazard[%d]: ref must reference content (game_id, base, or json)", i)
+		}
+		// A hazard has no elite/weak — force none so a stray adjustment can't persist.
+		h.Adjustment = AdjustmentNone
 	}
 	for i := range in.Treasure {
 		t := &in.Treasure[i]
