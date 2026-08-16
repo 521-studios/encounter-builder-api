@@ -71,6 +71,7 @@ func (h *handler) createEncounter(w http.ResponseWriter, r *http.Request) {
 		Description:   in.Description,
 		Notes:         in.Notes,
 		Monsters:      in.Monsters,
+		Hazards:       in.Hazards,
 		Treasure:      in.Treasure,
 		TreasurePools: in.TreasurePools,
 		XPAwards:      in.XPAwards,
@@ -136,6 +137,7 @@ func (h *handler) updateEncounter(w http.ResponseWriter, r *http.Request) {
 	existing.Description = in.Description
 	existing.Notes = in.Notes
 	existing.Monsters = in.Monsters
+	existing.Hazards = in.Hazards
 	existing.Treasure = in.Treasure
 	existing.TreasurePools = in.TreasurePools
 	existing.XPAwards = in.XPAwards
