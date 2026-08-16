@@ -20,6 +20,8 @@ func TestEncounterInput_Validate(t *testing.T) {
 		"hazard ok":         {EncounterInput{Name: "x", Hazards: []MonsterEntry{{Ref: pristine, Count: 1}}}, false},
 		"hazard no ref":     {EncounterInput{Name: "x", Hazards: []MonsterEntry{{Count: 1}}}, true},
 		"hazard count 0":    {EncounterInput{Name: "x", Hazards: []MonsterEntry{{Ref: pristine, Count: 0}}}, true},
+		"affliction ok":     {EncounterInput{Name: "x", Afflictions: []MonsterEntry{{Ref: pristine, Count: 1}}}, false},
+		"affliction no ref": {EncounterInput{Name: "x", Afflictions: []MonsterEntry{{Count: 1}}}, true},
 		"treasure no ref":   {EncounterInput{Name: "x", Treasure: []TreasureLine{{Qty: 1}}}, true},
 		"treasure qty 0":    {EncounterInput{Name: "x", Treasure: []TreasureLine{{Ref: pristine, Qty: 0}}}, true},
 		"bad sale_class":    {EncounterInput{Name: "x", Treasure: []TreasureLine{{Ref: pristine, Qty: 1, SaleClass: "junk"}}}, true},
@@ -116,8 +118,9 @@ func TestEncounterInput_ValidateNormalizesEnums(t *testing.T) {
 		Name:     "x",
 		Monsters: []MonsterEntry{{Ref: ContentRef{GameID: "g"}, Count: 1}},
 		// A hazard never has elite/weak — a stray adjustment must be forced to none.
-		Hazards:  []MonsterEntry{{Ref: ContentRef{GameID: "h"}, Count: 1, Adjustment: "elite"}},
-		Treasure: []TreasureLine{{Ref: ContentRef{JSON: json.RawMessage(`{}`)}, Qty: 1}},
+		Hazards:     []MonsterEntry{{Ref: ContentRef{GameID: "h"}, Count: 1, Adjustment: "elite"}},
+		Afflictions: []MonsterEntry{{Ref: ContentRef{GameID: "a"}, Count: 1, Adjustment: "weak"}},
+		Treasure:    []TreasureLine{{Ref: ContentRef{JSON: json.RawMessage(`{}`)}, Qty: 1}},
 	}
 	if err := in.Validate(); err != nil {
 		t.Fatalf("Validate: %v", err)
@@ -127,6 +130,9 @@ func TestEncounterInput_ValidateNormalizesEnums(t *testing.T) {
 	}
 	if in.Hazards[0].Adjustment != AdjustmentNone {
 		t.Errorf("hazard adjustment = %q, want none (forced)", in.Hazards[0].Adjustment)
+	}
+	if in.Afflictions[0].Adjustment != AdjustmentNone {
+		t.Errorf("affliction adjustment = %q, want none (forced)", in.Afflictions[0].Adjustment)
 	}
 	if in.Treasure[0].SaleClass != SaleNormal || in.Treasure[0].State != TreasureIntact {
 		t.Errorf("treasure enums = %q/%q, want normal/intact", in.Treasure[0].SaleClass, in.Treasure[0].State)

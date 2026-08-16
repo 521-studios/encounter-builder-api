@@ -231,6 +231,7 @@ type Encounter struct {
 	Notes         string         `json:"notes,omitempty"`
 	Monsters      []MonsterEntry `json:"monsters"`
 	Hazards       []MonsterEntry `json:"hazards,omitempty"`
+	Afflictions   []MonsterEntry `json:"afflictions,omitempty"`
 	Treasure      []TreasureLine `json:"treasure"`
 	TreasurePools []TreasurePool `json:"treasure_pools,omitempty"`
 	XPAwards      []XPAward      `json:"xp_awards,omitempty"`
@@ -332,6 +333,7 @@ type EncounterInput struct {
 	Notes         string         `json:"notes,omitempty"`
 	Monsters      []MonsterEntry `json:"monsters,omitempty"`
 	Hazards       []MonsterEntry `json:"hazards,omitempty"`
+	Afflictions   []MonsterEntry `json:"afflictions,omitempty"`
 	Treasure      []TreasureLine `json:"treasure,omitempty"`
 	TreasurePools []TreasurePool `json:"treasure_pools,omitempty"`
 	XPAwards      []XPAward      `json:"xp_awards,omitempty"`
@@ -382,6 +384,18 @@ func (in *EncounterInput) Validate() error {
 		}
 		// A hazard has no elite/weak — force none so a stray adjustment can't persist.
 		h.Adjustment = AdjustmentNone
+	}
+	// Afflictions (curses/diseases) reuse MonsterEntry the same way — ref + count, no
+	// elite/weak.
+	for i := range in.Afflictions {
+		a := &in.Afflictions[i]
+		if a.Count < 1 {
+			return fmt.Errorf("affliction[%d]: count must be >= 1", i)
+		}
+		if a.Ref.isEmpty() {
+			return fmt.Errorf("affliction[%d]: ref must reference content (game_id, base, or json)", i)
+		}
+		a.Adjustment = AdjustmentNone
 	}
 	for i := range in.Treasure {
 		t := &in.Treasure[i]

@@ -70,6 +70,10 @@ func sampleEncounter() model.Encounter {
 			Count:    2,
 			Nickname: "Web Lurker Noose",
 		}},
+		Afflictions: []model.MonsterEntry{{
+			Ref:   model.ContentRef{GameID: "Diseases:18"},
+			Count: 1,
+		}},
 		Treasure: []model.TreasureLine{{
 			LineID:    "t1",
 			Ref:       model.ContentRef{JSON: json.RawMessage(`{"name":"fireball scroll"}`)},
