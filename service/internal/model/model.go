@@ -54,6 +54,19 @@ type MonsterEntry struct {
 	Count      int        `json:"count"`
 	Adjustment Adjustment `json:"adjustment"`
 	Nickname   string     `json:"nickname,omitempty"`
+	// Loadout is the creature's carried equipment (0o77) — catalog or composed
+	// (runed) item refs, same shape as treasure/composed items, that the builder
+	// can send into the encounter loot. Opaque round-trip like treasure refs.
+	Loadout []LoadoutItem `json:"loadout,omitempty"`
+}
+
+// LoadoutItem is one piece of a creature's equipment: a catalog or composed item
+// ref with a quantity (and optional variant). Opaque to the API — the builder and
+// display library interpret the ref; the API stores + validates qty.
+type LoadoutItem struct {
+	Ref     ContentRef `json:"ref"`
+	Qty     int        `json:"qty"`
+	Variant string     `json:"variant,omitempty"`
 }
 
 // SaleClass governs sale value: pure treasure sells at full price.
@@ -399,6 +412,15 @@ func (in *EncounterInput) Validate() error {
 			m.Adjustment = AdjustmentNone
 		} else if !validAdjustments[m.Adjustment] {
 			return fmt.Errorf("monster[%d]: invalid adjustment %q", i, m.Adjustment)
+		}
+		for j := range m.Loadout {
+			l := &m.Loadout[j]
+			if l.Qty < 1 {
+				return fmt.Errorf("monster[%d].loadout[%d]: qty must be >= 1", i, j)
+			}
+			if l.Ref.isEmpty() {
+				return fmt.Errorf("monster[%d].loadout[%d]: ref must reference content", i, j)
+			}
 		}
 	}
 	// Hazards reuse MonsterEntry (ref + count; a haunt/hazard has no elite/weak, so
