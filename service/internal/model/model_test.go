@@ -78,6 +78,26 @@ func TestEncounterInput_Validate(t *testing.T) {
 			EncounterInput{Name: "x", SkillChecks: []SkillCheck{{Skill: "Perception", DC: 12, Description: "spot the loose planks"}}},
 			false,
 		},
+		"skill_check rich ok": {
+			EncounterInput{Name: "x", SkillChecks: []SkillCheck{{
+				Skill: "Thievery", DC: 25, Successes: 4,
+				Alternatives: []SkillOption{{Skill: "Religion", DC: 20}},
+				Outcomes:     &DegreeOutcomes{CritSuccess: "extra clue", Failure: "alarm"},
+			}}},
+			false,
+		},
+		"skill_check bad alternative dc": {
+			EncounterInput{Name: "x", SkillChecks: []SkillCheck{{Skill: "Thievery", DC: 22, Alternatives: []SkillOption{{Skill: "Religion", DC: 0}}}}},
+			true,
+		},
+		"skill_check bad alternative skill": {
+			EncounterInput{Name: "x", SkillChecks: []SkillCheck{{Skill: "Thievery", DC: 22, Alternatives: []SkillOption{{DC: 20}}}}},
+			true,
+		},
+		"skill_check negative successes": {
+			EncounterInput{Name: "x", SkillChecks: []SkillCheck{{Skill: "Perception", DC: 12, Successes: -1}}},
+			true,
+		},
 		"exit empty":        {EncounterInput{Name: "x", Exits: []Exit{{}}}, true},
 		"exit to target ok": {EncounterInput{Name: "x", Exits: []Exit{{ToEncounterID: "enc-a2"}}}, false},
 		"exit external ok":  {EncounterInput{Name: "x", Exits: []Exit{{Label: "Exterior"}}}, false},

@@ -282,6 +282,37 @@ func TestCreate_PersistsSkillChecks(t *testing.T) {
 	}
 }
 
+// xhwl: the richer skill-check fields (successes, alternatives, per-degree
+// outcomes) must be accepted (DisallowUnknownFields) and round-trip intact.
+func TestCreate_PersistsRichSkillCheck(t *testing.T) {
+	h, _ := newHandler(t, true, 0)
+	router := campaignRoutes(h)
+
+	body := `{"name":"Locked hatch","skill_checks":[{"skill":"Thievery","dc":25,"successes":4,"description":"pick the vault lock","alternatives":[{"skill":"Religion","dc":20}],"outcomes":{"crit_success":"open + no alarm","failure":"the lock jams"}}]}`
+	rec := do(t, router, http.MethodPost, encPath, body)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create = %d, want 201; body=%s", rec.Code, rec.Body)
+	}
+	var created model.Encounter
+	_ = json.Unmarshal(rec.Body.Bytes(), &created)
+	s := created.SkillChecks[0]
+	if s.Successes != 4 {
+		t.Fatalf("successes = %d, want 4", s.Successes)
+	}
+	if len(s.Alternatives) != 1 || s.Alternatives[0].Skill != "Religion" || s.Alternatives[0].DC != 20 {
+		t.Fatalf("alternatives not stored: %+v", s.Alternatives)
+	}
+	if s.Outcomes == nil || s.Outcomes.CritSuccess != "open + no alarm" || s.Outcomes.Failure != "the lock jams" {
+		t.Fatalf("outcomes not stored: %+v", s.Outcomes)
+	}
+
+	// An alternative with dc < 1 is rejected.
+	rec = do(t, router, http.MethodPost, encPath, `{"name":"x","skill_checks":[{"skill":"Thievery","dc":22,"alternatives":[{"skill":"Religion","dc":0}]}]}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("bad alternative dc = %d, want 400", rec.Code)
+	}
+}
+
 func TestCreate_PersistsExits(t *testing.T) {
 	h, _ := newHandler(t, true, 0)
 	router := campaignRoutes(h)

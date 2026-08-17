@@ -182,10 +182,34 @@ type Reward struct {
 // SkillCheck is a structured discovery/skill entry a room carries (e.g. "DC 12
 // Perception to spot the loose planks"). Skill + DC make it surfaceable at the
 // table instead of buried in prose; Description is what it reveals/does (markdown).
+//
+// Richer structure (xhwl), all optional/back-compat:
+//   - Successes: required successes to fully resolve (e.g. "4 successful DC 25
+//     Thievery checks"); 0/omitted = 1.
+//   - Alternatives: other skill+DC that ALSO satisfy the check ("DC 22 Thievery
+//     OR DC 20 Religion").
+//   - Outcomes: per-degree-of-success effect text (crit reveals extra, etc.).
 type SkillCheck struct {
-	Skill       string `json:"skill"`
-	DC          int    `json:"dc"`
-	Description string `json:"description,omitempty"`
+	Skill        string          `json:"skill"`
+	DC           int             `json:"dc"`
+	Description  string          `json:"description,omitempty"`
+	Successes    int             `json:"successes,omitempty"`
+	Alternatives []SkillOption   `json:"alternatives,omitempty"`
+	Outcomes     *DegreeOutcomes `json:"outcomes,omitempty"`
+}
+
+// SkillOption is one alternative skill+DC that satisfies a SkillCheck.
+type SkillOption struct {
+	Skill string `json:"skill"`
+	DC    int    `json:"dc"`
+}
+
+// DegreeOutcomes holds per-degree-of-success effect text; any field may be empty.
+type DegreeOutcomes struct {
+	CritSuccess string `json:"crit_success,omitempty"`
+	Success     string `json:"success,omitempty"`
+	Failure     string `json:"failure,omitempty"`
+	CritFailure string `json:"crit_failure,omitempty"`
 }
 
 // Exit is one edge of the dungeon connectivity graph — a passage from this room to
@@ -485,6 +509,18 @@ func (in *EncounterInput) Validate() error {
 		}
 		if s.DC < 1 {
 			return fmt.Errorf("skill_check[%d]: dc must be >= 1", i)
+		}
+		if s.Successes < 0 {
+			return fmt.Errorf("skill_check[%d]: successes must be >= 0", i)
+		}
+		for j := range s.Alternatives {
+			a := &s.Alternatives[j]
+			if a.Skill == "" {
+				return fmt.Errorf("skill_check[%d].alternative[%d]: skill is required", i, j)
+			}
+			if a.DC < 1 {
+				return fmt.Errorf("skill_check[%d].alternative[%d]: dc must be >= 1", i, j)
+			}
 		}
 	}
 	for i := range in.Exits {
