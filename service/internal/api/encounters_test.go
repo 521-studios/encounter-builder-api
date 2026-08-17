@@ -546,6 +546,40 @@ func TestCreate_ComposedTreasureCarriesPriceCp(t *testing.T) {
 // markdown description round-trip, and a *templated* monster stored as a derived
 // ContentRef ({base, modifications, json}) — which needs no new model field and
 // must pass validation via the recursive isEmpty (base references content).
+// 0o77: a monster's equipment loadout (catalog + composed item refs, qty) must be
+// accepted (DisallowUnknownFields) and round-trip intact.
+func TestCreate_PersistsMonsterLoadout(t *testing.T) {
+	h, _ := newHandler(t, true, 0)
+	router := campaignRoutes(h)
+
+	body := `{"name":"Armed mitflit","monsters":[{"count":3,"ref":{"game_id":"Monsters:mitflit"},"loadout":[
+		{"qty":3,"ref":{"game_id":"Weapons:shortsword"}},
+		{"qty":1,"variant":"+1","ref":{"base":{"game_id":"Weapons:rapier"},"modifications":[{"effect_game_id":"Runes:potency"}],"price_cp":3500}}
+	]}]}`
+	rec := do(t, router, http.MethodPost, encPath, body)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create = %d, want 201; body=%s", rec.Code, rec.Body)
+	}
+	var enc model.Encounter
+	_ = json.Unmarshal(rec.Body.Bytes(), &enc)
+	lo := enc.Monsters[0].Loadout
+	if len(lo) != 2 {
+		t.Fatalf("loadout not round-tripped: %+v", lo)
+	}
+	if lo[0].Qty != 3 || lo[0].Ref.GameID != "Weapons:shortsword" {
+		t.Fatalf("loadout[0] wrong: %+v", lo[0])
+	}
+	if lo[1].Variant != "+1" || lo[1].Ref.Base == nil || lo[1].Ref.Base.GameID != "Weapons:rapier" {
+		t.Fatalf("composed loadout item not preserved: %+v", lo[1])
+	}
+
+	// qty < 1 is rejected.
+	rec = do(t, router, http.MethodPost, encPath, `{"name":"x","monsters":[{"count":1,"ref":{"game_id":"g"},"loadout":[{"qty":0,"ref":{"game_id":"w"}}]}]}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("loadout qty 0 = %d, want 400", rec.Code)
+	}
+}
+
 func TestCreate_V2FieldsAndTemplatedMonster(t *testing.T) {
 	h, _ := newHandler(t, true, 0)
 	router := campaignRoutes(h)
