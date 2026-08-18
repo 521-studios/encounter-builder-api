@@ -238,6 +238,39 @@ func TestCreate_PersistsTextBlocks(t *testing.T) {
 	}
 }
 
+func TestCreate_PersistsChallengeBlocks(t *testing.T) {
+	h, _ := newHandler(t, true, 0)
+	router := campaignRoutes(h)
+
+	// challenge_blocks (the Challenges-tab markdown, separate from text_blocks) must pass
+	// the strict decoder and round-trip, and survive a routine PUT.
+	body := `{"name":"A1 Damp Entrance","challenge_blocks":[{"title":"Tactics","body":"Three mitflits lurk above the cobwebs."}]}`
+	rec := do(t, router, http.MethodPost, encPath, body)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create = %d, want 201; body=%s", rec.Code, rec.Body)
+	}
+	var created model.Encounter
+	_ = json.Unmarshal(rec.Body.Bytes(), &created)
+
+	rec = do(t, router, http.MethodGet, encPath+"/"+created.ID, "")
+	var got model.Encounter
+	_ = json.Unmarshal(rec.Body.Bytes(), &got)
+	if len(got.ChallengeBlocks) != 1 || got.ChallengeBlocks[0].Title != "Tactics" || got.ChallengeBlocks[0].Body != "Three mitflits lurk above the cobwebs." {
+		t.Fatalf("challenge_blocks round-trip wrong: %+v", got.ChallengeBlocks)
+	}
+
+	rec = do(t, router, http.MethodPut, encPath+"/"+created.ID,
+		`{"name":"A1 Damp Entrance","challenge_blocks":[{"body":"They flee when bloodied."}]}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("update = %d, want 200; body=%s", rec.Code, rec.Body)
+	}
+	var updated model.Encounter
+	_ = json.Unmarshal(rec.Body.Bytes(), &updated)
+	if len(updated.ChallengeBlocks) != 1 || updated.ChallengeBlocks[0].Body != "They flee when bloodied." {
+		t.Fatalf("update wiped/dropped challenge_blocks: %+v", updated.ChallengeBlocks)
+	}
+}
+
 func TestCreate_PersistsRoomTypeAndRewards(t *testing.T) {
 	h, _ := newHandler(t, true, 0)
 	router := campaignRoutes(h)
