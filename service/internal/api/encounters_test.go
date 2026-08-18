@@ -373,10 +373,16 @@ func TestCreate_PersistsExits(t *testing.T) {
 		t.Fatalf("update wiped/dropped exits: %+v", updated.Exits)
 	}
 
-	// An entirely-empty exit (no target, no label) is rejected.
+	// An entirely-empty exit (no target, no label) is ACCEPTED + persisted — it's a
+	// placeholder "+ exit" row the GM fills in later, so it must not be dropped.
 	rec = do(t, router, http.MethodPost, encPath, `{"name":"x","exits":[{}]}`)
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("empty exit = %d, want 400", rec.Code)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("empty exit = %d, want 201; body=%s", rec.Code, rec.Body)
+	}
+	var withBlank model.Encounter
+	_ = json.Unmarshal(rec.Body.Bytes(), &withBlank)
+	if len(withBlank.Exits) != 1 {
+		t.Fatalf("blank exit not persisted: %+v", withBlank.Exits)
 	}
 }
 

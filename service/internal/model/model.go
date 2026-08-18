@@ -558,12 +558,9 @@ func (in *EncounterInput) Validate() error {
 			}
 		}
 	}
-	for i := range in.Exits {
-		e := &in.Exits[i]
-		if e.ToEncounterID == "" && e.Label == "" {
-			return fmt.Errorf("exit[%d]: needs a target encounter or a label", i)
-		}
-	}
+	// Exits are NOT validated for content: a blank exit row (no target, no label) is a
+	// legitimate placeholder the GM adds via "+ exit" and fills in later, so it must
+	// persist rather than be dropped/rejected. The map ignores empty exits.
 	for _, c := range []int{in.Currency.CP, in.Currency.SP, in.Currency.GP, in.Currency.PP} {
 		if c < 0 {
 			return fmt.Errorf("currency amounts must be >= 0")

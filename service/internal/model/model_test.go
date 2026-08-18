@@ -101,7 +101,7 @@ func TestEncounterInput_Validate(t *testing.T) {
 		"loadout qty 0":     {EncounterInput{Name: "x", Monsters: []MonsterEntry{{Count: 1, Ref: ContentRef{GameID: "g"}, Loadout: []LoadoutItem{{Qty: 0, Ref: ContentRef{GameID: "w"}}}}}}, true},
 		"loadout empty ref": {EncounterInput{Name: "x", Monsters: []MonsterEntry{{Count: 1, Ref: ContentRef{GameID: "g"}, Loadout: []LoadoutItem{{Qty: 1}}}}}, true},
 		"loadout ok":        {EncounterInput{Name: "x", Monsters: []MonsterEntry{{Count: 1, Ref: ContentRef{GameID: "g"}, Loadout: []LoadoutItem{{Qty: 2, Ref: ContentRef{GameID: "w"}}}}}}, false},
-		"exit empty":        {EncounterInput{Name: "x", Exits: []Exit{{}}}, true},
+		"exit empty ok":     {EncounterInput{Name: "x", Exits: []Exit{{}}}, false}, // blank placeholder rows persist
 		"exit to target ok": {EncounterInput{Name: "x", Exits: []Exit{{ToEncounterID: "enc-a2"}}}, false},
 		"exit external ok":  {EncounterInput{Name: "x", Exits: []Exit{{Label: "Exterior"}}}, false},
 	}
