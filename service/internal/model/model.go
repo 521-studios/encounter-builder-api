@@ -233,6 +233,13 @@ type DegreeOutcomes struct {
 type Exit struct {
 	ToEncounterID string `json:"to_encounter_id,omitempty"`
 	Label         string `json:"label,omitempty"`
+	// Secret is per-direction: a passage secret from the hallway but obvious from the
+	// room has secret:true on the hall→room exit and secret:false on the room→hall one.
+	Secret bool `json:"secret,omitempty"`
+	// Skill/DC are an optional skill check to find or traverse this exit (e.g. Perception
+	// DC 18 to spot a secret door, Athletics DC 15 to climb). Also per-direction.
+	Skill string `json:"skill,omitempty"`
+	DC    int    `json:"dc,omitempty"`
 }
 
 // Currency is the coin reward.

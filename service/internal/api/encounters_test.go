@@ -351,15 +351,19 @@ func TestCreate_PersistsExits(t *testing.T) {
 	h, _ := newHandler(t, true, 0)
 	router := campaignRoutes(h)
 
-	body := `{"name":"A1","exits":[{"to_encounter_id":"enc-a2","label":"north door"},{"label":"Exterior"}]}`
+	body := `{"name":"A1","exits":[{"to_encounter_id":"enc-a2","label":"north door"},{"label":"Exterior"},{"to_encounter_id":"enc-a3","secret":true,"skill":"Perception","dc":18}]}`
 	rec := do(t, router, http.MethodPost, encPath, body)
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("create = %d, want 201; body=%s", rec.Code, rec.Body)
 	}
 	var created model.Encounter
 	_ = json.Unmarshal(rec.Body.Bytes(), &created)
-	if len(created.Exits) != 2 || created.Exits[0].ToEncounterID != "enc-a2" || created.Exits[1].Label != "Exterior" {
+	if len(created.Exits) != 3 || created.Exits[0].ToEncounterID != "enc-a2" || created.Exits[1].Label != "Exterior" {
 		t.Fatalf("exits not stored: %+v", created.Exits)
+	}
+	// The secret door + its skill check round-trip.
+	if !created.Exits[2].Secret || created.Exits[2].Skill != "Perception" || created.Exits[2].DC != 18 {
+		t.Fatalf("secret/skill/dc not stored: %+v", created.Exits[2])
 	}
 
 	// A routine edit (PUT) must carry exits, not wipe them.
