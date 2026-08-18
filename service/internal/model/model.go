@@ -282,25 +282,26 @@ type TextBlock struct {
 }
 
 type Encounter struct {
-	ID            string         `json:"id"`
-	CampaignID    string         `json:"campaign_id"`
-	Name          string         `json:"name"`
-	Status        Status         `json:"status"`
-	ChapterID     string         `json:"chapter_id,omitempty"`
-	Description   string         `json:"description,omitempty"` // legacy single body; migrated into TextBlocks on save
-	TextBlocks    []TextBlock    `json:"text_blocks,omitempty"`
-	Notes         string         `json:"notes,omitempty"`
-	Monsters      []MonsterEntry `json:"monsters"`
-	Hazards       []MonsterEntry `json:"hazards,omitempty"`
-	Afflictions   []MonsterEntry `json:"afflictions,omitempty"`
-	Treasure      []TreasureLine `json:"treasure"`
-	TreasurePools []TreasurePool `json:"treasure_pools,omitempty"`
-	XPAwards      []XPAward      `json:"xp_awards,omitempty"`
-	RoomType      RoomType       `json:"room_type,omitempty"`
-	Rewards       []Reward       `json:"rewards,omitempty"`
-	SkillChecks   []SkillCheck   `json:"skill_checks,omitempty"`
-	Exits         []Exit         `json:"exits,omitempty"`
-	Currency      Currency       `json:"currency"`
+	ID              string         `json:"id"`
+	CampaignID      string         `json:"campaign_id"`
+	Name            string         `json:"name"`
+	Status          Status         `json:"status"`
+	ChapterID       string         `json:"chapter_id,omitempty"`
+	Description     string         `json:"description,omitempty"` // legacy single body; migrated into TextBlocks on save
+	TextBlocks      []TextBlock    `json:"text_blocks,omitempty"`
+	ChallengeBlocks []TextBlock    `json:"challenge_blocks,omitempty"` // markdown sections under the Challenges tab
+	Notes           string         `json:"notes,omitempty"`
+	Monsters        []MonsterEntry `json:"monsters"`
+	Hazards         []MonsterEntry `json:"hazards,omitempty"`
+	Afflictions     []MonsterEntry `json:"afflictions,omitempty"`
+	Treasure        []TreasureLine `json:"treasure"`
+	TreasurePools   []TreasurePool `json:"treasure_pools,omitempty"`
+	XPAwards        []XPAward      `json:"xp_awards,omitempty"`
+	RoomType        RoomType       `json:"room_type,omitempty"`
+	Rewards         []Reward       `json:"rewards,omitempty"`
+	SkillChecks     []SkillCheck   `json:"skill_checks,omitempty"`
+	Exits           []Exit         `json:"exits,omitempty"`
+	Currency        Currency       `json:"currency"`
 	// PartyLevel/PartySize are the encounter's expected party level and PC count
 	// used for treasure/difficulty budgeting. nil means "inherit" — the client
 	// resolves encounter -> chapter -> campaign settings -> app default. The API
@@ -395,22 +396,23 @@ var validRewardKinds = map[RewardKind]bool{
 // status lifecycle, timestamps) simply aren't in this struct, so a client can't
 // set them — the handler maps the validated input onto a server-owned Encounter.
 type EncounterInput struct {
-	Name          string         `json:"name"`
-	ChapterID     string         `json:"chapter_id,omitempty"`
-	Description   string         `json:"description,omitempty"`
-	TextBlocks    []TextBlock    `json:"text_blocks,omitempty"`
-	Notes         string         `json:"notes,omitempty"`
-	Monsters      []MonsterEntry `json:"monsters,omitempty"`
-	Hazards       []MonsterEntry `json:"hazards,omitempty"`
-	Afflictions   []MonsterEntry `json:"afflictions,omitempty"`
-	Treasure      []TreasureLine `json:"treasure,omitempty"`
-	TreasurePools []TreasurePool `json:"treasure_pools,omitempty"`
-	XPAwards      []XPAward      `json:"xp_awards,omitempty"`
-	RoomType      RoomType       `json:"room_type,omitempty"`
-	Rewards       []Reward       `json:"rewards,omitempty"`
-	SkillChecks   []SkillCheck   `json:"skill_checks,omitempty"`
-	Exits         []Exit         `json:"exits,omitempty"`
-	Currency      Currency       `json:"currency"`
+	Name            string         `json:"name"`
+	ChapterID       string         `json:"chapter_id,omitempty"`
+	Description     string         `json:"description,omitempty"`
+	TextBlocks      []TextBlock    `json:"text_blocks,omitempty"`
+	ChallengeBlocks []TextBlock    `json:"challenge_blocks,omitempty"`
+	Notes           string         `json:"notes,omitempty"`
+	Monsters        []MonsterEntry `json:"monsters,omitempty"`
+	Hazards         []MonsterEntry `json:"hazards,omitempty"`
+	Afflictions     []MonsterEntry `json:"afflictions,omitempty"`
+	Treasure        []TreasureLine `json:"treasure,omitempty"`
+	TreasurePools   []TreasurePool `json:"treasure_pools,omitempty"`
+	XPAwards        []XPAward      `json:"xp_awards,omitempty"`
+	RoomType        RoomType       `json:"room_type,omitempty"`
+	Rewards         []Reward       `json:"rewards,omitempty"`
+	SkillChecks     []SkillCheck   `json:"skill_checks,omitempty"`
+	Exits           []Exit         `json:"exits,omitempty"`
+	Currency        Currency       `json:"currency"`
 	// PartyLevel/PartySize override the inherited expected-party values; nil
 	// leaves the encounter inheriting from its chapter/campaign.
 	PartyLevel *int `json:"party_level,omitempty"`

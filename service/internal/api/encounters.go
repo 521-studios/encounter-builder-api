@@ -63,29 +63,30 @@ func (h *handler) createEncounter(w http.ResponseWriter, r *http.Request) {
 	}
 	now := time.Now().UTC()
 	enc := model.Encounter{
-		ID:            newID(),
-		CampaignID:    chi.URLParam(r, "campaignID"),
-		Name:          in.Name,
-		Status:        model.StatusDraft, // new encounters always start in draft
-		ChapterID:     in.ChapterID,
-		Description:   in.Description,
-		TextBlocks:    in.TextBlocks,
-		Notes:         in.Notes,
-		Monsters:      in.Monsters,
-		Hazards:       in.Hazards,
-		Afflictions:   in.Afflictions,
-		Treasure:      in.Treasure,
-		TreasurePools: in.TreasurePools,
-		XPAwards:      in.XPAwards,
-		RoomType:      in.RoomType,
-		Rewards:       in.Rewards,
-		SkillChecks:   in.SkillChecks,
-		Exits:         in.Exits,
-		Currency:      in.Currency,
-		PartyLevel:    in.PartyLevel,
-		PartySize:     in.PartySize,
-		CreatedAt:     now,
-		UpdatedAt:     now,
+		ID:              newID(),
+		CampaignID:      chi.URLParam(r, "campaignID"),
+		Name:            in.Name,
+		Status:          model.StatusDraft, // new encounters always start in draft
+		ChapterID:       in.ChapterID,
+		Description:     in.Description,
+		TextBlocks:      in.TextBlocks,
+		ChallengeBlocks: in.ChallengeBlocks,
+		Notes:           in.Notes,
+		Monsters:        in.Monsters,
+		Hazards:         in.Hazards,
+		Afflictions:     in.Afflictions,
+		Treasure:        in.Treasure,
+		TreasurePools:   in.TreasurePools,
+		XPAwards:        in.XPAwards,
+		RoomType:        in.RoomType,
+		Rewards:         in.Rewards,
+		SkillChecks:     in.SkillChecks,
+		Exits:           in.Exits,
+		Currency:        in.Currency,
+		PartyLevel:      in.PartyLevel,
+		PartySize:       in.PartySize,
+		CreatedAt:       now,
+		UpdatedAt:       now,
 	}
 	if err := h.cfg.Store.Put(r.Context(), enc); err != nil {
 		writeJSON(w, http.StatusInternalServerError, errBody("could not save encounter"))
@@ -138,6 +139,7 @@ func (h *handler) updateEncounter(w http.ResponseWriter, r *http.Request) {
 	existing.ChapterID = in.ChapterID
 	existing.Description = in.Description
 	existing.TextBlocks = in.TextBlocks
+	existing.ChallengeBlocks = in.ChallengeBlocks
 	existing.Notes = in.Notes
 	existing.Monsters = in.Monsters
 	existing.Hazards = in.Hazards
