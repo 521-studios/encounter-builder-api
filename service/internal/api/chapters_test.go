@@ -101,6 +101,32 @@ func TestChapter_UpdateKeepsOrderWhenOmitted(t *testing.T) {
 	}
 }
 
+func TestChapter_MapPositionsRoundtripKeptWhenOmitted(t *testing.T) {
+	h, _ := newHandler(t, true, 0)
+	router := chapterRoutes(h)
+	// Create with a saved map layout.
+	rec := do(t, router, http.MethodPost, chPath, `{"name":"C","map_positions":{"e1":{"x":10,"y":20}}}`)
+	var c model.Chapter
+	_ = json.Unmarshal(rec.Body.Bytes(), &c)
+	if string(c.MapPositions) != `{"e1":{"x":10,"y":20}}` {
+		t.Fatalf("map_positions not stored on create: %s", c.MapPositions)
+	}
+	// A rename that omits map_positions must NOT wipe it (touch-only-when-supplied).
+	rec = do(t, router, http.MethodPut, chPath+"/"+c.ID, `{"name":"C renamed"}`)
+	var renamed model.Chapter
+	_ = json.Unmarshal(rec.Body.Bytes(), &renamed)
+	if string(renamed.MapPositions) != `{"e1":{"x":10,"y":20}}` {
+		t.Fatalf("omitted map_positions was wiped: %s", renamed.MapPositions)
+	}
+	// A drag-save that sends map_positions updates it.
+	rec = do(t, router, http.MethodPut, chPath+"/"+c.ID, `{"name":"C renamed","map_positions":{"e1":{"x":99,"y":5}}}`)
+	var moved model.Chapter
+	_ = json.Unmarshal(rec.Body.Bytes(), &moved)
+	if string(moved.MapPositions) != `{"e1":{"x":99,"y":5}}` {
+		t.Fatalf("map_positions not updated: %s", moved.MapPositions)
+	}
+}
+
 func TestChapter_CreateValidationRejects(t *testing.T) {
 	h, _ := newHandler(t, true, 0)
 	rec := do(t, chapterRoutes(h), http.MethodPost, chPath, `{"order":1}`)
