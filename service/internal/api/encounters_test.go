@@ -333,6 +333,18 @@ func TestCreate_RejectsInvalidChallenge(t *testing.T) {
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("invalid challenge type: got %d, want 400; body=%s", rec.Code, rec.Body)
 	}
+	// A skill_check challenge missing its DC must be rejected (mirrors the legacy rule).
+	rec = do(t, router, http.MethodPost, encPath,
+		`{"name":"bad","challenges":[{"id":"c1","type":"skill_check","skill_check":{"skill":"Perception"}}]}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("skill_check missing dc: got %d, want 400; body=%s", rec.Code, rec.Body)
+	}
+	// A typed challenge with no matching payload must be rejected (e.g. markdown with none).
+	rec = do(t, router, http.MethodPost, encPath,
+		`{"name":"bad","challenges":[{"id":"c1","type":"markdown"}]}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("markdown with nil payload: got %d, want 400; body=%s", rec.Code, rec.Body)
+	}
 }
 
 func TestCreate_PersistsRoomTypeAndRewards(t *testing.T) {
