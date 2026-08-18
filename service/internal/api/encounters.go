@@ -69,6 +69,7 @@ func (h *handler) createEncounter(w http.ResponseWriter, r *http.Request) {
 		Status:        model.StatusDraft, // new encounters always start in draft
 		ChapterID:     in.ChapterID,
 		Description:   in.Description,
+		TextBlocks:    in.TextBlocks,
 		Notes:         in.Notes,
 		Monsters:      in.Monsters,
 		Hazards:       in.Hazards,
@@ -136,6 +137,7 @@ func (h *handler) updateEncounter(w http.ResponseWriter, r *http.Request) {
 	existing.Name = in.Name
 	existing.ChapterID = in.ChapterID
 	existing.Description = in.Description
+	existing.TextBlocks = in.TextBlocks
 	existing.Notes = in.Notes
 	existing.Monsters = in.Monsters
 	existing.Hazards = in.Hazards

@@ -263,13 +263,25 @@ const (
 // rendered by the frontend (the API stores it verbatim, no sanitization here).
 // Monster templates need no new field: a templated monster is just a derived
 // MonsterEntry.Ref ({base, modifications:[{template_game_id, selections}…], json}).
+// TextBlock is one titled markdown section of an encounter's body. Title is
+// optional (an untitled block — e.g. the pre-blocks Description migrated on save).
+// Body is GM-authored markdown, stored verbatim (no sanitization here; the frontend
+// renders it). TextBlocks replaces the single Description: on the first save of an
+// encounter that still carries a Description, the client moves it into an untitled
+// block and clears Description (migrate-on-save). Opaque to the API otherwise.
+type TextBlock struct {
+	Title string `json:"title,omitempty"`
+	Body  string `json:"body"`
+}
+
 type Encounter struct {
 	ID            string         `json:"id"`
 	CampaignID    string         `json:"campaign_id"`
 	Name          string         `json:"name"`
 	Status        Status         `json:"status"`
 	ChapterID     string         `json:"chapter_id,omitempty"`
-	Description   string         `json:"description,omitempty"`
+	Description   string         `json:"description,omitempty"` // legacy single body; migrated into TextBlocks on save
+	TextBlocks    []TextBlock    `json:"text_blocks,omitempty"`
 	Notes         string         `json:"notes,omitempty"`
 	Monsters      []MonsterEntry `json:"monsters"`
 	Hazards       []MonsterEntry `json:"hazards,omitempty"`
@@ -372,6 +384,7 @@ type EncounterInput struct {
 	Name          string         `json:"name"`
 	ChapterID     string         `json:"chapter_id,omitempty"`
 	Description   string         `json:"description,omitempty"`
+	TextBlocks    []TextBlock    `json:"text_blocks,omitempty"`
 	Notes         string         `json:"notes,omitempty"`
 	Monsters      []MonsterEntry `json:"monsters,omitempty"`
 	Hazards       []MonsterEntry `json:"hazards,omitempty"`
