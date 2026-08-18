@@ -560,7 +560,8 @@ func (in *EncounterInput) Validate() error {
 	}
 	// Exits are NOT validated for content: a blank exit row (no target, no label) is a
 	// legitimate placeholder the GM adds via "+ exit" and fills in later, so it must
-	// persist rather than be dropped/rejected. The map ignores empty exits.
+	// persist rather than be dropped/rejected. Stored as-is; the frontend's connectivity
+	// map simply renders nothing for a blank exit.
 	for _, c := range []int{in.Currency.CP, in.Currency.SP, in.Currency.GP, in.Currency.PP} {
 		if c < 0 {
 			return fmt.Errorf("currency amounts must be >= 0")
