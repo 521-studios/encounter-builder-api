@@ -271,6 +271,70 @@ func TestCreate_PersistsChallengeBlocks(t *testing.T) {
 	}
 }
 
+func TestCreate_PersistsChallengesInOrder(t *testing.T) {
+	h, _ := newHandler(t, true, 0)
+	router := campaignRoutes(h)
+
+	// A mixed, interleaved challenges list must round-trip verbatim IN ORDER (monster,
+	// markdown, skill_check) and survive a PUT.
+	body := `{"name":"A1 Damp Entrance","challenges":[
+		{"id":"c1","type":"monster","monster":{"ref":{"game_id":"Monsters:mitflit"},"count":3,"adjustment":"none"}},
+		{"id":"c2","type":"markdown","markdown":{"title":"Tactics","body":"They lurk above the cobwebs."}},
+		{"id":"c3","type":"skill_check","skill_check":{"skill":"Perception","dc":12}}
+	]}`
+	rec := do(t, router, http.MethodPost, encPath, body)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create = %d, want 201; body=%s", rec.Code, rec.Body)
+	}
+	var created model.Encounter
+	_ = json.Unmarshal(rec.Body.Bytes(), &created)
+
+	rec = do(t, router, http.MethodGet, encPath+"/"+created.ID, "")
+	var got model.Encounter
+	_ = json.Unmarshal(rec.Body.Bytes(), &got)
+	if len(got.Challenges) != 3 {
+		t.Fatalf("challenges round-trip wrong length: %+v", got.Challenges)
+	}
+	if got.Challenges[0].Type != model.ChallengeMonster || got.Challenges[0].Monster == nil || got.Challenges[0].Monster.Count != 3 {
+		t.Fatalf("challenge[0] monster wrong: %+v", got.Challenges[0])
+	}
+	if got.Challenges[1].Type != model.ChallengeMarkdown || got.Challenges[1].Markdown == nil || got.Challenges[1].Markdown.Title != "Tactics" {
+		t.Fatalf("challenge[1] markdown wrong: %+v", got.Challenges[1])
+	}
+	if got.Challenges[2].Type != model.ChallengeSkillCheck || got.Challenges[2].SkillCheck == nil || got.Challenges[2].SkillCheck.DC != 12 {
+		t.Fatalf("challenge[2] skill_check wrong: %+v", got.Challenges[2])
+	}
+
+	rec = do(t, router, http.MethodPut, encPath+"/"+created.ID,
+		`{"name":"A1 Damp Entrance","challenges":[{"id":"c9","type":"markdown","markdown":{"body":"Rewritten."}}]}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("update = %d, want 200; body=%s", rec.Code, rec.Body)
+	}
+	var updated model.Encounter
+	_ = json.Unmarshal(rec.Body.Bytes(), &updated)
+	if len(updated.Challenges) != 1 || updated.Challenges[0].Markdown == nil || updated.Challenges[0].Markdown.Body != "Rewritten." {
+		t.Fatalf("update wiped/dropped challenges: %+v", updated.Challenges)
+	}
+}
+
+func TestCreate_RejectsInvalidChallenge(t *testing.T) {
+	h, _ := newHandler(t, true, 0)
+	router := campaignRoutes(h)
+
+	// A monster challenge with no ref must be rejected (strict, like a legacy monster row).
+	rec := do(t, router, http.MethodPost, encPath,
+		`{"name":"bad","challenges":[{"id":"c1","type":"monster","monster":{"count":1}}]}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("empty-ref monster challenge: got %d, want 400; body=%s", rec.Code, rec.Body)
+	}
+	// An unknown challenge type must be rejected.
+	rec = do(t, router, http.MethodPost, encPath,
+		`{"name":"bad","challenges":[{"id":"c1","type":"trap"}]}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("invalid challenge type: got %d, want 400; body=%s", rec.Code, rec.Body)
+	}
+}
+
 func TestCreate_PersistsRoomTypeAndRewards(t *testing.T) {
 	h, _ := newHandler(t, true, 0)
 	router := campaignRoutes(h)

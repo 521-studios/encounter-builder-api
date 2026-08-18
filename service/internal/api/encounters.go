@@ -81,6 +81,7 @@ func (h *handler) createEncounter(w http.ResponseWriter, r *http.Request) {
 		RoomType:        in.RoomType,
 		Rewards:         in.Rewards,
 		SkillChecks:     in.SkillChecks,
+		Challenges:      in.Challenges,
 		Exits:           in.Exits,
 		Currency:        in.Currency,
 		PartyLevel:      in.PartyLevel,
@@ -150,6 +151,7 @@ func (h *handler) updateEncounter(w http.ResponseWriter, r *http.Request) {
 	existing.RoomType = in.RoomType
 	existing.Rewards = in.Rewards
 	existing.SkillChecks = in.SkillChecks
+	existing.Challenges = in.Challenges
 	existing.Exits = in.Exits
 	existing.Currency = in.Currency
 	existing.PartyLevel = in.PartyLevel
