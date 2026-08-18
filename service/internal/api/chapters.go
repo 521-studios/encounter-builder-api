@@ -35,6 +35,9 @@ func (h *handler) createChapter(w http.ResponseWriter, r *http.Request) {
 	}
 	ch.PartyLevel = in.PartyLevel
 	ch.PartySize = in.PartySize
+	if in.MapPositions != nil {
+		ch.MapPositions = *in.MapPositions
+	}
 	if err := h.cfg.Store.PutChapter(r.Context(), ch); err != nil {
 		writeJSON(w, http.StatusInternalServerError, errBody("could not save chapter"))
 		return
@@ -82,6 +85,11 @@ func (h *handler) updateChapter(w http.ResponseWriter, r *http.Request) {
 	// with the existing rename; the frontend round-trips both.
 	ch.PartyLevel = in.PartyLevel
 	ch.PartySize = in.PartySize
+	// Touch-only-when-supplied (like Order): a rename/party edit omits map_positions and
+	// must not wipe the GM's saved layout; only the map-drag save sends it.
+	if in.MapPositions != nil {
+		ch.MapPositions = *in.MapPositions
+	}
 	ch.UpdatedAt = time.Now().UTC()
 	if err := h.cfg.Store.PutChapter(r.Context(), ch); err != nil {
 		writeJSON(w, http.StatusInternalServerError, errBody("could not save chapter"))

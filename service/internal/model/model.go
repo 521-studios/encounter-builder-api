@@ -328,19 +328,26 @@ type Chapter struct {
 	// Full-replaced on update (like Encounter/CampaignSettings): a nil field
 	// clears the override back to inherit. Partial-update callers (the sidebar
 	// rename) must round-trip these or a rename would wipe them.
-	PartyLevel *int      `json:"party_level,omitempty"`
-	PartySize  *int      `json:"party_size,omitempty"`
-	CreatedAt  time.Time `json:"created_at"`
-	UpdatedAt  time.Time `json:"updated_at"`
+	PartyLevel *int `json:"party_level,omitempty"`
+	PartySize  *int `json:"party_size,omitempty"`
+	// MapPositions is the GM's hand-arranged chapter-map layout: a {encounter_id:{x,y}}
+	// blob the connectivity map seeds node positions from. Opaque to the API (stored +
+	// round-tripped, not interpreted); the frontend reconciles it against the current
+	// rooms (auto-place added, prune removed).
+	MapPositions json.RawMessage `json:"map_positions,omitempty"`
+	CreatedAt    time.Time       `json:"created_at"`
+	UpdatedAt    time.Time       `json:"updated_at"`
 }
 
 // ChapterInput is the client-writable shape for create/update (server owns
-// id/campaign/timestamps). Order is optional — omit to leave it unchanged.
+// id/campaign/timestamps). Order + MapPositions are touch-only-when-supplied (omit =
+// leave unchanged) so a rename/party edit that doesn't send them can't wipe them.
 type ChapterInput struct {
-	Name       string `json:"name"`
-	Order      *int   `json:"order,omitempty"`
-	PartyLevel *int   `json:"party_level,omitempty"`
-	PartySize  *int   `json:"party_size,omitempty"`
+	Name         string           `json:"name"`
+	Order        *int             `json:"order,omitempty"`
+	PartyLevel   *int             `json:"party_level,omitempty"`
+	PartySize    *int             `json:"party_size,omitempty"`
+	MapPositions *json.RawMessage `json:"map_positions,omitempty"`
 }
 
 func (in ChapterInput) Validate() error {
