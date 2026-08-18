@@ -204,6 +204,40 @@ func TestCreate_PersistsXPAwards(t *testing.T) {
 	}
 }
 
+func TestCreate_PersistsTextBlocks(t *testing.T) {
+	h, _ := newHandler(t, true, 0)
+	router := campaignRoutes(h)
+
+	// text_blocks must pass the strict (DisallowUnknownFields) decoder and round-trip
+	// verbatim. A migrated block is untitled (title omitted); a named block keeps its title.
+	body := `{"name":"A2 Decrepit Drawbridge","text_blocks":[{"body":"The bridge sags over the moat."},{"title":"Tactics","body":"It collapses on the third crossing."}]}`
+	rec := do(t, router, http.MethodPost, encPath, body)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create = %d, want 201; body=%s", rec.Code, rec.Body)
+	}
+	var created model.Encounter
+	_ = json.Unmarshal(rec.Body.Bytes(), &created)
+
+	rec = do(t, router, http.MethodGet, encPath+"/"+created.ID, "")
+	var got model.Encounter
+	_ = json.Unmarshal(rec.Body.Bytes(), &got)
+	if len(got.TextBlocks) != 2 || got.TextBlocks[0].Title != "" || got.TextBlocks[0].Body != "The bridge sags over the moat." || got.TextBlocks[1].Title != "Tactics" {
+		t.Fatalf("text_blocks round-trip wrong: %+v", got.TextBlocks)
+	}
+
+	// A routine edit (PUT) must carry text_blocks, not silently wipe them.
+	rec = do(t, router, http.MethodPut, encPath+"/"+created.ID,
+		`{"name":"A2 Decrepit Drawbridge","text_blocks":[{"body":"Rebuilt sturdier."}]}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("update = %d, want 200; body=%s", rec.Code, rec.Body)
+	}
+	var updated model.Encounter
+	_ = json.Unmarshal(rec.Body.Bytes(), &updated)
+	if len(updated.TextBlocks) != 1 || updated.TextBlocks[0].Body != "Rebuilt sturdier." {
+		t.Fatalf("update wiped/dropped text_blocks: %+v", updated.TextBlocks)
+	}
+}
+
 func TestCreate_PersistsRoomTypeAndRewards(t *testing.T) {
 	h, _ := newHandler(t, true, 0)
 	router := campaignRoutes(h)
