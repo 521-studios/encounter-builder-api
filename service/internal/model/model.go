@@ -281,27 +281,54 @@ type TextBlock struct {
 	Body  string `json:"body"`
 }
 
+// ChallengeType discriminates a unified Challenges-list entry.
+type ChallengeType string
+
+const (
+	ChallengeMonster    ChallengeType = "monster"
+	ChallengeHazard     ChallengeType = "hazard"
+	ChallengeAffliction ChallengeType = "affliction"
+	ChallengeSkillCheck ChallengeType = "skill_check"
+	ChallengeMarkdown   ChallengeType = "markdown"
+)
+
+// ChallengeItem is one entry in an encounter's ordered Challenges list, unifying the
+// formerly-separate monsters/hazards/afflictions/skill_checks/challenge_blocks arrays so
+// their interleaved order (and the GM's drag-reordering) is preserved. Exactly one
+// payload is set, keyed by Type: Monster carries monster/hazard/affliction (all
+// MonsterEntry-shaped — Type distinguishes them for XP); SkillCheck and Markdown carry
+// their own. ID is a stable client-assigned key the reorder UI drags by. Encounters
+// created before this field migrate their legacy arrays into Challenges on the client.
+type ChallengeItem struct {
+	ID         string        `json:"id"`
+	Type       ChallengeType `json:"type"`
+	Monster    *MonsterEntry `json:"monster,omitempty"`
+	SkillCheck *SkillCheck   `json:"skill_check,omitempty"`
+	Markdown   *TextBlock    `json:"markdown,omitempty"`
+}
+
 type Encounter struct {
-	ID              string         `json:"id"`
-	CampaignID      string         `json:"campaign_id"`
-	Name            string         `json:"name"`
-	Status          Status         `json:"status"`
-	ChapterID       string         `json:"chapter_id,omitempty"`
-	Description     string         `json:"description,omitempty"` // legacy single body; migrated into TextBlocks on save
-	TextBlocks      []TextBlock    `json:"text_blocks,omitempty"`
-	ChallengeBlocks []TextBlock    `json:"challenge_blocks,omitempty"` // markdown sections under the Challenges tab
-	Notes           string         `json:"notes,omitempty"`
-	Monsters        []MonsterEntry `json:"monsters"`
-	Hazards         []MonsterEntry `json:"hazards,omitempty"`
-	Afflictions     []MonsterEntry `json:"afflictions,omitempty"`
-	Treasure        []TreasureLine `json:"treasure"`
-	TreasurePools   []TreasurePool `json:"treasure_pools,omitempty"`
-	XPAwards        []XPAward      `json:"xp_awards,omitempty"`
-	RoomType        RoomType       `json:"room_type,omitempty"`
-	Rewards         []Reward       `json:"rewards,omitempty"`
-	SkillChecks     []SkillCheck   `json:"skill_checks,omitempty"`
-	Exits           []Exit         `json:"exits,omitempty"`
-	Currency        Currency       `json:"currency"`
+	ID              string          `json:"id"`
+	CampaignID      string          `json:"campaign_id"`
+	Name            string          `json:"name"`
+	Status          Status          `json:"status"`
+	ChapterID       string          `json:"chapter_id,omitempty"`
+	Description     string          `json:"description,omitempty"` // legacy single body; migrated into TextBlocks on save
+	TextBlocks      []TextBlock     `json:"text_blocks,omitempty"`
+	ChallengeBlocks []TextBlock     `json:"challenge_blocks,omitempty"` // markdown sections under the Challenges tab
+	Notes           string          `json:"notes,omitempty"`
+	Monsters        []MonsterEntry  `json:"monsters"`
+	Hazards         []MonsterEntry  `json:"hazards,omitempty"`
+	Afflictions     []MonsterEntry  `json:"afflictions,omitempty"`
+	Treasure        []TreasureLine  `json:"treasure"`
+	TreasurePools   []TreasurePool  `json:"treasure_pools,omitempty"`
+	XPAwards        []XPAward       `json:"xp_awards,omitempty"`
+	RoomType        RoomType        `json:"room_type,omitempty"`
+	Rewards         []Reward        `json:"rewards,omitempty"`
+	SkillChecks     []SkillCheck    `json:"skill_checks,omitempty"`
+	Challenges      []ChallengeItem `json:"challenges,omitempty"` // unified ordered list; supersedes the monsters/hazards/afflictions/skill_checks/challenge_blocks arrays above (migrated on the client)
+	Exits           []Exit          `json:"exits,omitempty"`
+	Currency        Currency        `json:"currency"`
 	// PartyLevel/PartySize are the encounter's expected party level and PC count
 	// used for treasure/difficulty budgeting. nil means "inherit" — the client
 	// resolves encounter -> chapter -> campaign settings -> app default. The API
@@ -390,29 +417,34 @@ var validRoomTypes = map[RoomType]bool{
 var validRewardKinds = map[RewardKind]bool{
 	RewardInformation: true, RewardRitual: true, RewardAlly: true, RewardItem: true,
 }
+var validChallengeTypes = map[ChallengeType]bool{
+	ChallengeMonster: true, ChallengeHazard: true, ChallengeAffliction: true,
+	ChallengeSkillCheck: true, ChallengeMarkdown: true,
+}
 
 // EncounterInput is the client-writable shape for create/update. Keeping it
 // separate from Encounter is the invariant: server-owned fields (id, campaign,
 // status lifecycle, timestamps) simply aren't in this struct, so a client can't
 // set them — the handler maps the validated input onto a server-owned Encounter.
 type EncounterInput struct {
-	Name            string         `json:"name"`
-	ChapterID       string         `json:"chapter_id,omitempty"`
-	Description     string         `json:"description,omitempty"`
-	TextBlocks      []TextBlock    `json:"text_blocks,omitempty"`
-	ChallengeBlocks []TextBlock    `json:"challenge_blocks,omitempty"`
-	Notes           string         `json:"notes,omitempty"`
-	Monsters        []MonsterEntry `json:"monsters,omitempty"`
-	Hazards         []MonsterEntry `json:"hazards,omitempty"`
-	Afflictions     []MonsterEntry `json:"afflictions,omitempty"`
-	Treasure        []TreasureLine `json:"treasure,omitempty"`
-	TreasurePools   []TreasurePool `json:"treasure_pools,omitempty"`
-	XPAwards        []XPAward      `json:"xp_awards,omitempty"`
-	RoomType        RoomType       `json:"room_type,omitempty"`
-	Rewards         []Reward       `json:"rewards,omitempty"`
-	SkillChecks     []SkillCheck   `json:"skill_checks,omitempty"`
-	Exits           []Exit         `json:"exits,omitempty"`
-	Currency        Currency       `json:"currency"`
+	Name            string          `json:"name"`
+	ChapterID       string          `json:"chapter_id,omitempty"`
+	Description     string          `json:"description,omitempty"`
+	TextBlocks      []TextBlock     `json:"text_blocks,omitempty"`
+	ChallengeBlocks []TextBlock     `json:"challenge_blocks,omitempty"`
+	Notes           string          `json:"notes,omitempty"`
+	Monsters        []MonsterEntry  `json:"monsters,omitempty"`
+	Hazards         []MonsterEntry  `json:"hazards,omitempty"`
+	Afflictions     []MonsterEntry  `json:"afflictions,omitempty"`
+	Treasure        []TreasureLine  `json:"treasure,omitempty"`
+	TreasurePools   []TreasurePool  `json:"treasure_pools,omitempty"`
+	XPAwards        []XPAward       `json:"xp_awards,omitempty"`
+	RoomType        RoomType        `json:"room_type,omitempty"`
+	Rewards         []Reward        `json:"rewards,omitempty"`
+	SkillChecks     []SkillCheck    `json:"skill_checks,omitempty"`
+	Challenges      []ChallengeItem `json:"challenges,omitempty"`
+	Exits           []Exit          `json:"exits,omitempty"`
+	Currency        Currency        `json:"currency"`
 	// PartyLevel/PartySize override the inherited expected-party values; nil
 	// leaves the encounter inheriting from its chapter/campaign.
 	PartyLevel *int `json:"party_level,omitempty"`
@@ -571,6 +603,74 @@ func (in *EncounterInput) Validate() error {
 			}
 			if a.DC < 1 {
 				return fmt.Errorf("skill_check[%d].alternative[%d]: dc must be >= 1", i, j)
+			}
+		}
+	}
+	// Challenges is the unified successor to the arrays above; validate each entry by
+	// type using the same per-kind rules. The client sends only complete items (empty
+	// placeholders are dropped on save, like today's monster rows), so strict here.
+	for i := range in.Challenges {
+		c := &in.Challenges[i]
+		if !validChallengeTypes[c.Type] {
+			return fmt.Errorf("challenge[%d]: invalid type %q", i, c.Type)
+		}
+		switch c.Type {
+		case ChallengeMonster, ChallengeHazard, ChallengeAffliction:
+			m := c.Monster
+			if m == nil {
+				return fmt.Errorf("challenge[%d]: %s requires a monster payload", i, c.Type)
+			}
+			if m.Count < 1 {
+				return fmt.Errorf("challenge[%d]: count must be >= 1", i)
+			}
+			if m.Ref.isEmpty() {
+				return fmt.Errorf("challenge[%d]: ref must reference content (game_id, base, or json)", i)
+			}
+			// Only a monster can be elite/weak; a hazard/affliction normalizes to none.
+			if c.Type == ChallengeMonster {
+				if m.Adjustment == "" {
+					m.Adjustment = AdjustmentNone
+				} else if !validAdjustments[m.Adjustment] {
+					return fmt.Errorf("challenge[%d]: invalid adjustment %q", i, m.Adjustment)
+				}
+			} else {
+				m.Adjustment = AdjustmentNone
+			}
+			for j := range m.Loadout {
+				l := &m.Loadout[j]
+				if l.Qty < 1 {
+					return fmt.Errorf("challenge[%d].loadout[%d]: qty must be >= 1", i, j)
+				}
+				if l.Ref.isEmpty() {
+					return fmt.Errorf("challenge[%d].loadout[%d]: ref must reference content", i, j)
+				}
+			}
+		case ChallengeSkillCheck:
+			s := c.SkillCheck
+			if s == nil {
+				return fmt.Errorf("challenge[%d]: skill_check requires a skill_check payload", i)
+			}
+			if s.Skill == "" {
+				return fmt.Errorf("challenge[%d]: skill is required", i)
+			}
+			if s.DC < 1 {
+				return fmt.Errorf("challenge[%d]: dc must be >= 1", i)
+			}
+			if s.Successes < 0 {
+				return fmt.Errorf("challenge[%d]: successes must be >= 0", i)
+			}
+			for j := range s.Alternatives {
+				a := &s.Alternatives[j]
+				if a.Skill == "" {
+					return fmt.Errorf("challenge[%d].alternative[%d]: skill is required", i, j)
+				}
+				if a.DC < 1 {
+					return fmt.Errorf("challenge[%d].alternative[%d]: dc must be >= 1", i, j)
+				}
+			}
+		case ChallengeMarkdown:
+			if c.Markdown == nil {
+				return fmt.Errorf("challenge[%d]: markdown requires a markdown payload", i)
 			}
 		}
 	}
