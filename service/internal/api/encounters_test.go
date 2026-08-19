@@ -406,23 +406,54 @@ func TestCreate_PersistsContentInOrder(t *testing.T) {
 func TestCreate_RejectsInvalidContent(t *testing.T) {
 	h, _ := newHandler(t, true, 0)
 	router := campaignRoutes(h)
+	// Content items save in-progress work: completeness (a ref, a skill, a label, a
+	// DC) is NEVER required at save time. Only STRUCTURAL problems reject: unknown
+	// type, missing payload, negative numbers, invalid enums. A completeness check is
+	// planned for the release (draft→done) path — see bd rvd4 — not this save path.
 	cases := []string{
-		`{"name":"x","content":[{"id":"1","type":"bogus"}]}`,                                                                               // unknown type
-		`{"name":"x","content":[{"id":"1","type":"treasure","treasure":{"qty":1}}]}`,                                                       // treasure no ref
-		`{"name":"x","content":[{"id":"1","type":"reward","reward":{"kind":"information"}}]}`,                                              // reward no label
-		`{"name":"x","content":[{"id":"1","type":"pool","pool":{"gate":{"dc":5}}}]}`,                                                       // pool gate no skill
-		`{"name":"x","content":[{"id":"1","type":"coin","coin":{"gp":-1}}]}`,                                                               // negative coin
-		`{"name":"x","content":[{"id":"1","type":"monster"}]}`,                                                                             // missing payload
-		`{"name":"x","content":[{"id":"1","type":"skill_check","skill_check":{"skill":"Perception"}}]}`,                                    // skill_check no dc
-		`{"name":"x","content":[{"id":"1","type":"monster","monster":{"ref":{"game_id":"M:1"},"count":1,"adjustment":"huge"}}]}`,           // invalid adjustment
-		`{"name":"x","content":[{"id":"1","type":"monster","monster":{"ref":{"game_id":"M:1"},"count":0}}]}`,                               // count < 1
-		`{"name":"x","content":[{"id":"1","type":"treasure","treasure":{"ref":{"game_id":"W:1"},"qty":1,"value_tiers":{}}}]}`,              // empty value_tiers
-		`{"name":"x","content":[{"id":"1","type":"skill_check","skill_check":{"skill":"Perception","dc":12,"alternatives":[{"dc":10}]}}]}`, // alternative missing skill
+		`{"name":"x","content":[{"id":"1","type":"bogus"}]}`,                                                                                                  // unknown type
+		`{"name":"x","content":[{"id":"1","type":"coin","coin":{"gp":-1}}]}`,                                                                                  // negative coin
+		`{"name":"x","content":[{"id":"1","type":"monster"}]}`,                                                                                                // missing payload
+		`{"name":"x","content":[{"id":"1","type":"monster","monster":{"ref":{"game_id":"M:1"},"count":1,"adjustment":"huge"}}]}`,                              // invalid adjustment
+		`{"name":"x","content":[{"id":"1","type":"monster","monster":{"ref":{"game_id":"M:1"},"count":-1}}]}`,                                                 // negative count
+		`{"name":"x","content":[{"id":"1","type":"skill_check","skill_check":{"skill":"Perception","dc":-1}}]}`,                                               // negative dc
+		`{"name":"x","content":[{"id":"1","type":"xp_award","xp_award":{"amount":-5}}]}`,                                                                      // negative xp
+		`{"name":"x","content":[{"id":"1","type":"reward","reward":{"kind":"bogus","label":"x"}}]}`,                                                           // invalid reward kind
+		`{"name":"x","content":[{"id":"1","type":"treasure","treasure":{"ref":{"game_id":"W:1"},"qty":-1}}]}`,                                                 // negative qty
+		`{"name":"x","content":[{"id":"1","type":"pool","pool":{"gate":{"dc":-1}}}]}`,                                                                         // negative pool-gate dc
+		`{"name":"x","content":[{"id":"1","type":"monster","monster":{"ref":{"game_id":"M:1"},"count":1,"loadout":[{"ref":{"game_id":"W:1"},"qty":-1}]}}]}`,   // negative loadout qty
+		`{"name":"x","content":[{"id":"1","type":"skill_check","skill_check":{"skill":"Perception","dc":12,"alternatives":[{"skill":"Religion","dc":-1}]}}]}`, // negative alternative dc
+		`{"name":"x","content":[{"id":"1","type":"treasure","treasure":{"ref":{"game_id":"W:1"},"qty":1,"value_tiers":{"success":-100}}}]}`,                   // negative value_tier
 	}
 	for _, body := range cases {
 		rec := do(t, router, http.MethodPost, encPath, body)
 		if rec.Code != http.StatusBadRequest {
 			t.Fatalf("expected 400 for %s; got %d (%s)", body, rec.Code, rec.Body)
+		}
+	}
+}
+
+// Incomplete-but-structurally-valid content persists — a GM must never lose
+// in-progress work because a row isn't finished. A completeness check is planned
+// for the release (draft→done) path (bd rvd4), never on this save path.
+func TestCreate_AcceptsIncompleteContent(t *testing.T) {
+	h, _ := newHandler(t, true, 0)
+	router := campaignRoutes(h)
+	cases := []string{
+		`{"name":"x","content":[{"id":"1","type":"treasure","treasure":{"qty":1}}]}`,                                                       // treasure, no ref yet
+		`{"name":"x","content":[{"id":"1","type":"reward","reward":{"kind":"information"}}]}`,                                              // reward, no label yet
+		`{"name":"x","content":[{"id":"1","type":"pool","pool":{"gate":{"dc":5}}}]}`,                                                       // pool gate, no skill yet
+		`{"name":"x","content":[{"id":"1","type":"skill_check","skill_check":{"skill":"Perception"}}]}`,                                    // check, no dc yet
+		`{"name":"x","content":[{"id":"1","type":"skill_check","skill_check":{}}]}`,                                                        // check, nothing picked yet
+		`{"name":"x","content":[{"id":"1","type":"monster","monster":{"count":0}}]}`,                                                       // monster, no ref yet
+		`{"name":"x","content":[{"id":"1","type":"xp_award","xp_award":{"reason":"tbd"}}]}`,                                                // xp, no amount yet
+		`{"name":"x","content":[{"id":"1","type":"skill_check","skill_check":{"skill":"Perception","dc":12,"alternatives":[{"dc":10}]}}]}`, // alt, no skill yet
+		`{"name":"x","content":[{"id":"1","type":"treasure","treasure":{"ref":{"game_id":"W:1"},"qty":1,"value_tiers":{}}}]}`,              // empty value_tiers no longer required to set a tier
+	}
+	for _, body := range cases {
+		rec := do(t, router, http.MethodPost, encPath, body)
+		if rec.Code != http.StatusCreated {
+			t.Fatalf("expected 201 for %s; got %d (%s)", body, rec.Code, rec.Body)
 		}
 	}
 }
