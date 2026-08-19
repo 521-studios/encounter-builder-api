@@ -347,6 +347,86 @@ func TestCreate_RejectsInvalidChallenge(t *testing.T) {
 	}
 }
 
+func TestCreate_PersistsContentInOrder(t *testing.T) {
+	h, _ := newHandler(t, true, 0)
+	router := campaignRoutes(h)
+
+	// The unified "Encounter" content list mixes every type and must round-trip IN ORDER.
+	body := `{"name":"A1 Damp Entrance","content":[
+		{"id":"c1","type":"box_text","markdown":{"body":"Swaths of mildew cover the walls."}},
+		{"id":"c2","type":"monster","monster":{"ref":{"game_id":"Monsters:mitflit"},"count":3,"adjustment":"none"}},
+		{"id":"c3","type":"skill_check","skill_check":{"skill":"Perception","dc":12}},
+		{"id":"c4","type":"pool","pool":{"name":"Altar","gate":{"skill":"Perception","dc":18}}},
+		{"id":"c5","type":"treasure","treasure":{"ref":{"game_id":"Weapons:1"},"qty":1}},
+		{"id":"c6","type":"coin","coin":{"gp":12}},
+		{"id":"c7","type":"xp_award","xp_award":{"amount":30,"reason":"ally"}},
+		{"id":"c8","type":"reward","reward":{"kind":"information","label":"Belcorra's history"}}
+	]}`
+	rec := do(t, router, http.MethodPost, encPath, body)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create = %d, want 201; body=%s", rec.Code, rec.Body)
+	}
+	var created model.Encounter
+	_ = json.Unmarshal(rec.Body.Bytes(), &created)
+	rec = do(t, router, http.MethodGet, encPath+"/"+created.ID, "")
+	var got model.Encounter
+	_ = json.Unmarshal(rec.Body.Bytes(), &got)
+	if len(got.Content) != 8 {
+		t.Fatalf("content round-trip wrong length: %+v", got.Content)
+	}
+	types := make([]model.ContentType, len(got.Content))
+	for i, c := range got.Content {
+		types[i] = c.Type
+	}
+	want := []model.ContentType{"box_text", "monster", "skill_check", "pool", "treasure", "coin", "xp_award", "reward"}
+	for i := range want {
+		if types[i] != want[i] {
+			t.Fatalf("content order wrong at %d: got %v want %v", i, types, want)
+		}
+	}
+	if got.Content[3].Pool == nil || got.Content[3].Pool.Gate == nil || got.Content[3].Pool.Gate.DC != 18 {
+		t.Fatalf("pool payload wrong: %+v", got.Content[3])
+	}
+	if got.Content[5].Coin == nil || got.Content[5].Coin.GP != 12 {
+		t.Fatalf("coin payload wrong: %+v", got.Content[5])
+	}
+
+	rec = do(t, router, http.MethodPut, encPath+"/"+created.ID,
+		`{"name":"A1 Damp Entrance","content":[{"id":"c9","type":"markdown","markdown":{"body":"Rewritten."}}]}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("update = %d, want 200; body=%s", rec.Code, rec.Body)
+	}
+	var updated model.Encounter
+	_ = json.Unmarshal(rec.Body.Bytes(), &updated)
+	if len(updated.Content) != 1 || updated.Content[0].Markdown == nil || updated.Content[0].Markdown.Body != "Rewritten." {
+		t.Fatalf("update wiped/dropped content: %+v", updated.Content)
+	}
+}
+
+func TestCreate_RejectsInvalidContent(t *testing.T) {
+	h, _ := newHandler(t, true, 0)
+	router := campaignRoutes(h)
+	cases := []string{
+		`{"name":"x","content":[{"id":"1","type":"bogus"}]}`,                                                                               // unknown type
+		`{"name":"x","content":[{"id":"1","type":"treasure","treasure":{"qty":1}}]}`,                                                       // treasure no ref
+		`{"name":"x","content":[{"id":"1","type":"reward","reward":{"kind":"information"}}]}`,                                              // reward no label
+		`{"name":"x","content":[{"id":"1","type":"pool","pool":{"gate":{"dc":5}}}]}`,                                                       // pool gate no skill
+		`{"name":"x","content":[{"id":"1","type":"coin","coin":{"gp":-1}}]}`,                                                               // negative coin
+		`{"name":"x","content":[{"id":"1","type":"monster"}]}`,                                                                             // missing payload
+		`{"name":"x","content":[{"id":"1","type":"skill_check","skill_check":{"skill":"Perception"}}]}`,                                    // skill_check no dc
+		`{"name":"x","content":[{"id":"1","type":"monster","monster":{"ref":{"game_id":"M:1"},"count":1,"adjustment":"huge"}}]}`,           // invalid adjustment
+		`{"name":"x","content":[{"id":"1","type":"monster","monster":{"ref":{"game_id":"M:1"},"count":0}}]}`,                               // count < 1
+		`{"name":"x","content":[{"id":"1","type":"treasure","treasure":{"ref":{"game_id":"W:1"},"qty":1,"value_tiers":{}}}]}`,              // empty value_tiers
+		`{"name":"x","content":[{"id":"1","type":"skill_check","skill_check":{"skill":"Perception","dc":12,"alternatives":[{"dc":10}]}}]}`, // alternative missing skill
+	}
+	for _, body := range cases {
+		rec := do(t, router, http.MethodPost, encPath, body)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("expected 400 for %s; got %d (%s)", body, rec.Code, rec.Body)
+		}
+	}
+}
+
 func TestCreate_PersistsRoomTypeAndRewards(t *testing.T) {
 	h, _ := newHandler(t, true, 0)
 	router := campaignRoutes(h)

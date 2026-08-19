@@ -307,6 +307,50 @@ type ChallengeItem struct {
 	Markdown   *TextBlock    `json:"markdown,omitempty"`
 }
 
+// ContentType discriminates an entry in the encounter's single ordered `content` list —
+// the "Encounter" authoring surface that merges the former Description, Challenges, and
+// Rewards tabs. It supersedes text_blocks + challenges + treasure/treasure_pools/
+// xp_awards/rewards/currency (all migrated into `content` on the client).
+type ContentType string
+
+const (
+	ContentMarkdown   ContentType = "markdown"    // a titled markdown section
+	ContentBoxText    ContentType = "box_text"    // module-style read-aloud/box text
+	ContentMonster    ContentType = "monster"     // \
+	ContentHazard     ContentType = "hazard"      //  > MonsterEntry-shaped, Type distinguishes XP
+	ContentAffliction ContentType = "affliction"  // /
+	ContentSkillCheck ContentType = "skill_check" // a structured skill check
+	ContentPool       ContentType = "pool"        // a treasure-pool HEADER; loot after it (until the next pool) belongs to it
+	ContentTreasure   ContentType = "treasure"    // one treasure line
+	ContentCoin       ContentType = "coin"        // a coin drop (Currency amount)
+	ContentXPAward    ContentType = "xp_award"    // a non-combat XP award
+	ContentReward     ContentType = "reward"      // a non-treasure reward
+)
+
+// PoolHeader is the payload of a `pool` content item: a named treasure group with an
+// optional discovery Gate. Grouping is POSITIONAL — treasure/coin items following the
+// header (until the next header) belong to this pool — so there is no per-line pool id.
+type PoolHeader struct {
+	Name string `json:"name,omitempty"`
+	Gate *Gate  `json:"gate,omitempty"`
+}
+
+// ContentItem is one entry in the ordered `content` list. Exactly one payload is set,
+// keyed by Type. Markdown carries markdown + box_text; Monster carries monster/hazard/
+// affliction. ID is the stable client key the reorder UI drags by.
+type ContentItem struct {
+	ID         string        `json:"id"`
+	Type       ContentType   `json:"type"`
+	Markdown   *TextBlock    `json:"markdown,omitempty"`
+	Monster    *MonsterEntry `json:"monster,omitempty"`
+	SkillCheck *SkillCheck   `json:"skill_check,omitempty"`
+	Pool       *PoolHeader   `json:"pool,omitempty"`
+	Treasure   *TreasureLine `json:"treasure,omitempty"`
+	Coin       *Currency     `json:"coin,omitempty"`
+	XPAward    *XPAward      `json:"xp_award,omitempty"`
+	Reward     *Reward       `json:"reward,omitempty"`
+}
+
 type Encounter struct {
 	ID              string          `json:"id"`
 	CampaignID      string          `json:"campaign_id"`
@@ -327,6 +371,7 @@ type Encounter struct {
 	Rewards         []Reward        `json:"rewards,omitempty"`
 	SkillChecks     []SkillCheck    `json:"skill_checks,omitempty"`
 	Challenges      []ChallengeItem `json:"challenges,omitempty"` // unified ordered list; supersedes the monsters/hazards/afflictions/skill_checks/challenge_blocks arrays above (migrated on the client)
+	Content         []ContentItem   `json:"content,omitempty"`    // the single ordered "Encounter" list; supersedes text_blocks + challenges + treasure/treasure_pools/xp_awards/rewards/currency (all migrated on the client)
 	Exits           []Exit          `json:"exits,omitempty"`
 	Currency        Currency        `json:"currency"`
 	// PartyLevel/PartySize are the encounter's expected party level and PC count
@@ -421,6 +466,100 @@ var validChallengeTypes = map[ChallengeType]bool{
 	ChallengeMonster: true, ChallengeHazard: true, ChallengeAffliction: true,
 	ChallengeSkillCheck: true, ChallengeMarkdown: true,
 }
+var validContentTypes = map[ContentType]bool{
+	ContentMarkdown: true, ContentBoxText: true, ContentMonster: true, ContentHazard: true,
+	ContentAffliction: true, ContentSkillCheck: true, ContentPool: true, ContentTreasure: true,
+	ContentCoin: true, ContentXPAward: true, ContentReward: true,
+}
+
+// Per-payload validators, shared by the `content` list. Messages use a content[i]
+// prefix supplied by the caller. Adjustment normalization mutates through the pointer.
+func validateMonsterPayload(m *MonsterEntry, allowAdjustment bool, at string) error {
+	if m.Count < 1 {
+		return fmt.Errorf("%s: count must be >= 1", at)
+	}
+	if m.Ref.isEmpty() {
+		return fmt.Errorf("%s: ref must reference content (game_id, base, or json)", at)
+	}
+	if allowAdjustment {
+		if m.Adjustment == "" {
+			m.Adjustment = AdjustmentNone
+		} else if !validAdjustments[m.Adjustment] {
+			return fmt.Errorf("%s: invalid adjustment %q", at, m.Adjustment)
+		}
+	} else {
+		m.Adjustment = AdjustmentNone
+	}
+	for j := range m.Loadout {
+		l := &m.Loadout[j]
+		if l.Qty < 1 {
+			return fmt.Errorf("%s.loadout[%d]: qty must be >= 1", at, j)
+		}
+		if l.Ref.isEmpty() {
+			return fmt.Errorf("%s.loadout[%d]: ref must reference content", at, j)
+		}
+	}
+	return nil
+}
+
+func validateSkillCheckPayload(s *SkillCheck, at string) error {
+	if s.Skill == "" {
+		return fmt.Errorf("%s: skill is required", at)
+	}
+	if s.DC < 1 {
+		return fmt.Errorf("%s: dc must be >= 1", at)
+	}
+	if s.Successes < 0 {
+		return fmt.Errorf("%s: successes must be >= 0", at)
+	}
+	for j := range s.Alternatives {
+		a := &s.Alternatives[j]
+		if a.Skill == "" {
+			return fmt.Errorf("%s.alternative[%d]: skill is required", at, j)
+		}
+		if a.DC < 1 {
+			return fmt.Errorf("%s.alternative[%d]: dc must be >= 1", at, j)
+		}
+	}
+	return nil
+}
+
+func validateTreasurePayload(t *TreasureLine, at string) error {
+	if t.Qty < 1 {
+		return fmt.Errorf("%s: qty must be >= 1", at)
+	}
+	if t.Ref.isEmpty() {
+		return fmt.Errorf("%s: ref must reference content (game_id, base, or json)", at)
+	}
+	if t.SaleClass == "" {
+		t.SaleClass = SaleNormal
+	} else if !validSaleClasses[t.SaleClass] {
+		return fmt.Errorf("%s: invalid sale_class %q", at, t.SaleClass)
+	}
+	if t.State == "" {
+		t.State = TreasureIntact
+	} else if !validTreasureStates[t.State] {
+		return fmt.Errorf("%s: invalid state %q", at, t.State)
+	}
+	if t.IdentifyDC < 0 {
+		return fmt.Errorf("%s: identify_dc must be >= 0", at)
+	}
+	if v := t.ValueTiers; v != nil {
+		anySet := false
+		for _, tier := range []*int{v.CritSuccess, v.Success, v.Failure, v.CritFailure} {
+			if tier != nil {
+				anySet = true
+				if *tier < 0 {
+					return fmt.Errorf("%s: value_tiers amounts must be >= 0", at)
+				}
+			}
+		}
+		if !anySet {
+			return fmt.Errorf("%s: value_tiers must set at least one tier", at)
+		}
+	}
+	return nil
+}
 
 // EncounterInput is the client-writable shape for create/update. Keeping it
 // separate from Encounter is the invariant: server-owned fields (id, campaign,
@@ -443,6 +582,7 @@ type EncounterInput struct {
 	Rewards         []Reward        `json:"rewards,omitempty"`
 	SkillChecks     []SkillCheck    `json:"skill_checks,omitempty"`
 	Challenges      []ChallengeItem `json:"challenges,omitempty"`
+	Content         []ContentItem   `json:"content,omitempty"`
 	Exits           []Exit          `json:"exits,omitempty"`
 	Currency        Currency        `json:"currency"`
 	// PartyLevel/PartySize override the inherited expected-party values; nil
@@ -671,6 +811,77 @@ func (in *EncounterInput) Validate() error {
 		case ChallengeMarkdown:
 			if c.Markdown == nil {
 				return fmt.Errorf("challenge[%d]: markdown requires a markdown payload", i)
+			}
+		}
+	}
+	// Content is the single ordered "Encounter" list; validate each entry by type. Like
+	// the arrays above, the client drops empty placeholders before saving, so strict here.
+	for i := range in.Content {
+		c := &in.Content[i]
+		at := fmt.Sprintf("content[%d]", i)
+		if !validContentTypes[c.Type] {
+			return fmt.Errorf("%s: invalid type %q", at, c.Type)
+		}
+		switch c.Type {
+		case ContentMarkdown, ContentBoxText:
+			if c.Markdown == nil {
+				return fmt.Errorf("%s: %s requires a markdown payload", at, c.Type)
+			}
+		case ContentMonster, ContentHazard, ContentAffliction:
+			if c.Monster == nil {
+				return fmt.Errorf("%s: %s requires a monster payload", at, c.Type)
+			}
+			if err := validateMonsterPayload(c.Monster, c.Type == ContentMonster, at); err != nil {
+				return err
+			}
+		case ContentSkillCheck:
+			if c.SkillCheck == nil {
+				return fmt.Errorf("%s: skill_check requires a skill_check payload", at)
+			}
+			if err := validateSkillCheckPayload(c.SkillCheck, at); err != nil {
+				return err
+			}
+		case ContentPool:
+			if c.Pool == nil {
+				return fmt.Errorf("%s: pool requires a pool payload", at)
+			}
+			if g := c.Pool.Gate; g != nil {
+				if g.Skill == "" {
+					return fmt.Errorf("%s: pool gate requires a skill", at)
+				}
+				if g.DC < 1 {
+					return fmt.Errorf("%s: pool gate dc must be >= 1", at)
+				}
+			}
+		case ContentTreasure:
+			if c.Treasure == nil {
+				return fmt.Errorf("%s: treasure requires a treasure payload", at)
+			}
+			if err := validateTreasurePayload(c.Treasure, at); err != nil {
+				return err
+			}
+		case ContentCoin:
+			if c.Coin == nil {
+				return fmt.Errorf("%s: coin requires a coin payload", at)
+			}
+			for _, amt := range []int{c.Coin.CP, c.Coin.SP, c.Coin.GP, c.Coin.PP} {
+				if amt < 0 {
+					return fmt.Errorf("%s: coin amounts must be >= 0", at)
+				}
+			}
+		case ContentXPAward:
+			if c.XPAward == nil || c.XPAward.Amount < 1 {
+				return fmt.Errorf("%s: xp_award requires an amount >= 1", at)
+			}
+		case ContentReward:
+			if c.Reward == nil {
+				return fmt.Errorf("%s: reward requires a reward payload", at)
+			}
+			if !validRewardKinds[c.Reward.Kind] {
+				return fmt.Errorf("%s: invalid reward kind %q", at, c.Reward.Kind)
+			}
+			if c.Reward.Label == "" {
+				return fmt.Errorf("%s: reward label is required", at)
 			}
 		}
 	}
