@@ -407,13 +407,17 @@ func TestCreate_RejectsInvalidContent(t *testing.T) {
 	h, _ := newHandler(t, true, 0)
 	router := campaignRoutes(h)
 	cases := []string{
-		`{"name":"x","content":[{"id":"1","type":"bogus"}]}`,                                            // unknown type
-		`{"name":"x","content":[{"id":"1","type":"treasure","treasure":{"qty":1}}]}`,                    // treasure no ref
-		`{"name":"x","content":[{"id":"1","type":"reward","reward":{"kind":"information"}}]}`,           // reward no label
-		`{"name":"x","content":[{"id":"1","type":"pool","pool":{"gate":{"dc":5}}}]}`,                    // pool gate no skill
-		`{"name":"x","content":[{"id":"1","type":"coin","coin":{"gp":-1}}]}`,                            // negative coin
-		`{"name":"x","content":[{"id":"1","type":"monster"}]}`,                                          // missing payload
-		`{"name":"x","content":[{"id":"1","type":"skill_check","skill_check":{"skill":"Perception"}}]}`, // skill_check no dc
+		`{"name":"x","content":[{"id":"1","type":"bogus"}]}`,                                                                               // unknown type
+		`{"name":"x","content":[{"id":"1","type":"treasure","treasure":{"qty":1}}]}`,                                                       // treasure no ref
+		`{"name":"x","content":[{"id":"1","type":"reward","reward":{"kind":"information"}}]}`,                                              // reward no label
+		`{"name":"x","content":[{"id":"1","type":"pool","pool":{"gate":{"dc":5}}}]}`,                                                       // pool gate no skill
+		`{"name":"x","content":[{"id":"1","type":"coin","coin":{"gp":-1}}]}`,                                                               // negative coin
+		`{"name":"x","content":[{"id":"1","type":"monster"}]}`,                                                                             // missing payload
+		`{"name":"x","content":[{"id":"1","type":"skill_check","skill_check":{"skill":"Perception"}}]}`,                                    // skill_check no dc
+		`{"name":"x","content":[{"id":"1","type":"monster","monster":{"ref":{"game_id":"M:1"},"count":1,"adjustment":"huge"}}]}`,           // invalid adjustment
+		`{"name":"x","content":[{"id":"1","type":"monster","monster":{"ref":{"game_id":"M:1"},"count":0}}]}`,                               // count < 1
+		`{"name":"x","content":[{"id":"1","type":"treasure","treasure":{"ref":{"game_id":"W:1"},"qty":1,"value_tiers":{}}}]}`,              // empty value_tiers
+		`{"name":"x","content":[{"id":"1","type":"skill_check","skill_check":{"skill":"Perception","dc":12,"alternatives":[{"dc":10}]}}]}`, // alternative missing skill
 	}
 	for _, body := range cases {
 		rec := do(t, router, http.MethodPost, encPath, body)
