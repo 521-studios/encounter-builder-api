@@ -475,11 +475,11 @@ var validContentTypes = map[ContentType]bool{
 // Per-payload validators, shared by the `content` list. Messages use a content[i]
 // prefix supplied by the caller. Adjustment normalization mutates through the pointer.
 func validateMonsterPayload(m *MonsterEntry, allowAdjustment bool, at string) error {
-	if m.Count < 1 {
-		return fmt.Errorf("%s: count must be >= 1", at)
-	}
-	if m.Ref.isEmpty() {
-		return fmt.Errorf("%s: ref must reference content (game_id, base, or json)", at)
+	// Content items save in-progress work — completeness is NOT required (ref/skill/label
+	// may be blank while the GM is still filling a row in). Validation is structural only:
+	// valid enums + non-negative numbers. See the content loop in Validate().
+	if m.Count < 0 {
+		return fmt.Errorf("%s: count must be >= 0", at)
 	}
 	if allowAdjustment {
 		if m.Adjustment == "" {
@@ -491,45 +491,32 @@ func validateMonsterPayload(m *MonsterEntry, allowAdjustment bool, at string) er
 		m.Adjustment = AdjustmentNone
 	}
 	for j := range m.Loadout {
-		l := &m.Loadout[j]
-		if l.Qty < 1 {
-			return fmt.Errorf("%s.loadout[%d]: qty must be >= 1", at, j)
-		}
-		if l.Ref.isEmpty() {
-			return fmt.Errorf("%s.loadout[%d]: ref must reference content", at, j)
+		if m.Loadout[j].Qty < 0 {
+			return fmt.Errorf("%s.loadout[%d]: qty must be >= 0", at, j)
 		}
 	}
 	return nil
 }
 
 func validateSkillCheckPayload(s *SkillCheck, at string) error {
-	if s.Skill == "" {
-		return fmt.Errorf("%s: skill is required", at)
-	}
-	if s.DC < 1 {
-		return fmt.Errorf("%s: dc must be >= 1", at)
+	// skill + dc are both optional — a check can be authored before they're decided.
+	if s.DC < 0 {
+		return fmt.Errorf("%s: dc must be >= 0", at)
 	}
 	if s.Successes < 0 {
 		return fmt.Errorf("%s: successes must be >= 0", at)
 	}
 	for j := range s.Alternatives {
-		a := &s.Alternatives[j]
-		if a.Skill == "" {
-			return fmt.Errorf("%s.alternative[%d]: skill is required", at, j)
-		}
-		if a.DC < 1 {
-			return fmt.Errorf("%s.alternative[%d]: dc must be >= 1", at, j)
+		if s.Alternatives[j].DC < 0 {
+			return fmt.Errorf("%s.alternative[%d]: dc must be >= 0", at, j)
 		}
 	}
 	return nil
 }
 
 func validateTreasurePayload(t *TreasureLine, at string) error {
-	if t.Qty < 1 {
-		return fmt.Errorf("%s: qty must be >= 1", at)
-	}
-	if t.Ref.isEmpty() {
-		return fmt.Errorf("%s: ref must reference content (game_id, base, or json)", at)
+	if t.Qty < 0 {
+		return fmt.Errorf("%s: qty must be >= 0", at)
 	}
 	if t.SaleClass == "" {
 		t.SaleClass = SaleNormal
@@ -545,17 +532,10 @@ func validateTreasurePayload(t *TreasureLine, at string) error {
 		return fmt.Errorf("%s: identify_dc must be >= 0", at)
 	}
 	if v := t.ValueTiers; v != nil {
-		anySet := false
 		for _, tier := range []*int{v.CritSuccess, v.Success, v.Failure, v.CritFailure} {
-			if tier != nil {
-				anySet = true
-				if *tier < 0 {
-					return fmt.Errorf("%s: value_tiers amounts must be >= 0", at)
-				}
+			if tier != nil && *tier < 0 {
+				return fmt.Errorf("%s: value_tiers amounts must be >= 0", at)
 			}
-		}
-		if !anySet {
-			return fmt.Errorf("%s: value_tiers must set at least one tier", at)
 		}
 	}
 	return nil
@@ -845,13 +825,8 @@ func (in *EncounterInput) Validate() error {
 			if c.Pool == nil {
 				return fmt.Errorf("%s: pool requires a pool payload", at)
 			}
-			if g := c.Pool.Gate; g != nil {
-				if g.Skill == "" {
-					return fmt.Errorf("%s: pool gate requires a skill", at)
-				}
-				if g.DC < 1 {
-					return fmt.Errorf("%s: pool gate dc must be >= 1", at)
-				}
+			if g := c.Pool.Gate; g != nil && g.DC < 0 {
+				return fmt.Errorf("%s: pool gate dc must be >= 0", at)
 			}
 		case ContentTreasure:
 			if c.Treasure == nil {
@@ -870,18 +845,18 @@ func (in *EncounterInput) Validate() error {
 				}
 			}
 		case ContentXPAward:
-			if c.XPAward == nil || c.XPAward.Amount < 1 {
-				return fmt.Errorf("%s: xp_award requires an amount >= 1", at)
+			if c.XPAward == nil {
+				return fmt.Errorf("%s: xp_award requires a payload", at)
+			}
+			if c.XPAward.Amount < 0 {
+				return fmt.Errorf("%s: xp_award amount must be >= 0", at)
 			}
 		case ContentReward:
 			if c.Reward == nil {
 				return fmt.Errorf("%s: reward requires a reward payload", at)
 			}
-			if !validRewardKinds[c.Reward.Kind] {
+			if c.Reward.Kind != "" && !validRewardKinds[c.Reward.Kind] {
 				return fmt.Errorf("%s: invalid reward kind %q", at, c.Reward.Kind)
-			}
-			if c.Reward.Label == "" {
-				return fmt.Errorf("%s: reward label is required", at)
 			}
 		}
 	}
