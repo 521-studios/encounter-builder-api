@@ -193,6 +193,8 @@ func TestIncompleteContent(t *testing.T) {
 	complete := []ContentItem{
 		{ID: "md", Type: ContentMarkdown, Markdown: &TextBlock{Body: "read aloud"}},
 		{ID: "mon", Type: ContentMonster, Monster: &MonsterEntry{Ref: goodRef, Count: 2}},
+		{ID: "haz", Type: ContentHazard, Monster: &MonsterEntry{Ref: goodRef, Count: 1}},
+		{ID: "aff", Type: ContentAffliction, Monster: &MonsterEntry{Ref: goodRef, Count: 1}},
 		{ID: "sc", Type: ContentSkillCheck, SkillCheck: &SkillCheck{Skill: "Perception", DC: 12,
 			Alternatives: []SkillOption{{Skill: "Nature", DC: 10}}}},
 		{ID: "pool", Type: ContentPool, Pool: &PoolHeader{Name: "altar", Gate: &Gate{Skill: "Perception", DC: 18}}},
@@ -208,12 +210,17 @@ func TestIncompleteContent(t *testing.T) {
 		t.Fatalf("empty content reported gaps: %+v", gaps)
 	}
 
-	// Each half-filled row reports its own missing field(s), keyed by item id.
+	// Each half-filled row reports its own missing field(s) AND type, keyed by item
+	// id. The three creature-ish types each get a no-ref case so their distinct
+	// "creature"/"hazard"/"affliction" labels are all exercised.
 	incomplete := []ContentItem{
-		{ID: "md", Type: ContentBoxText, Markdown: &TextBlock{Body: "  "}}, // blank body
-		{ID: "mon", Type: ContentMonster, Monster: &MonsterEntry{}},        // no ref, count 0
-		{ID: "haz", Type: ContentHazard, Monster: &MonsterEntry{Ref: goodRef, Count: 1, // loadout row unset
+		{ID: "md", Type: ContentBoxText, Markdown: &TextBlock{Body: "  "}},        // blank body
+		{ID: "mon", Type: ContentMonster, Monster: &MonsterEntry{}},               // no ref, count 0
+		{ID: "hazref", Type: ContentHazard, Monster: &MonsterEntry{Count: 1}},     // no ref → "hazard"
+		{ID: "affref", Type: ContentAffliction, Monster: &MonsterEntry{Count: 1}}, // no ref → "affliction"
+		{ID: "hazlo", Type: ContentHazard, Monster: &MonsterEntry{Ref: goodRef, Count: 1, // loadout row unset
 			Loadout: []LoadoutItem{{}}}},
+		{ID: "scns", Type: ContentSkillCheck, SkillCheck: &SkillCheck{DC: 12}},            // no skill → "skill"
 		{ID: "sc", Type: ContentSkillCheck, SkillCheck: &SkillCheck{Skill: "Perception"}}, // no DC
 		{ID: "sc2", Type: ContentSkillCheck, SkillCheck: &SkillCheck{Skill: "Thievery", DC: 20, // bad alt
 			Alternatives: []SkillOption{{Skill: "", DC: 0}}}},
@@ -224,28 +231,42 @@ func TestIncompleteContent(t *testing.T) {
 		{ID: "rw", Type: ContentReward, Reward: &Reward{Kind: "bogus"}},        // bad kind, no label
 	}
 	gaps := IncompleteContent(incomplete)
-	got := map[string][]string{}
+	gotMissing := map[string][]string{}
+	gotType := map[string]ContentType{}
 	for _, g := range gaps {
-		got[g.ItemID] = g.Missing
+		gotMissing[g.ItemID] = g.Missing
+		gotType[g.ItemID] = g.Type
 	}
-	want := map[string][]string{
-		"md":   {"text"},
-		"mon":  {"creature", "count"},
-		"haz":  {"equipment item"},
-		"sc":   {"DC"},
-		"sc2":  {"alternative skill/DC"},
-		"pool": {"pool name", "gate skill", "gate DC"},
-		"tr":   {"item", "quantity"},
-		"coin": {"amount"},
-		"xp":   {"XP amount"},
-		"rw":   {"kind", "label"},
+	wantMissing := map[string][]string{
+		"md":     {"text"},
+		"mon":    {"creature", "count"},
+		"hazref": {"hazard"},
+		"affref": {"affliction"},
+		"hazlo":  {"equipment item"},
+		"scns":   {"skill"},
+		"sc":     {"DC"},
+		"sc2":    {"alternative skill/DC"},
+		"pool":   {"pool name", "gate skill", "gate DC"},
+		"tr":     {"item", "quantity"},
+		"coin":   {"amount"},
+		"xp":     {"XP amount"},
+		"rw":     {"kind", "label"},
 	}
-	if len(got) != len(want) {
-		t.Fatalf("gap count = %d, want %d; gaps=%+v", len(got), len(want), gaps)
+	wantType := map[string]ContentType{
+		"md": ContentBoxText, "mon": ContentMonster, "hazref": ContentHazard,
+		"affref": ContentAffliction, "hazlo": ContentHazard, "scns": ContentSkillCheck,
+		"sc": ContentSkillCheck, "sc2": ContentSkillCheck, "pool": ContentPool,
+		"tr": ContentTreasure, "coin": ContentCoin, "xp": ContentXPAward, "rw": ContentReward,
 	}
-	for id, wm := range want {
-		if !equalStrings(got[id], wm) {
-			t.Errorf("item %q missing = %v, want %v", id, got[id], wm)
+	if len(gotMissing) != len(wantMissing) {
+		t.Fatalf("gap count = %d, want %d; gaps=%+v", len(gotMissing), len(wantMissing), gaps)
+	}
+	for id, wm := range wantMissing {
+		if !equalStrings(gotMissing[id], wm) {
+			t.Errorf("item %q missing = %v, want %v", id, gotMissing[id], wm)
+		}
+		if gotType[id] != wantType[id] {
+			t.Errorf("item %q type = %q, want %q", id, gotType[id], wantType[id])
 		}
 	}
 }
