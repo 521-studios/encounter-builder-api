@@ -648,6 +648,57 @@ func TestRelease_LifecycleAndImmutability(t *testing.T) {
 	}
 }
 
+func TestRelease_CompletenessGate(t *testing.T) {
+	h, _ := newHandler(t, true, 0)
+	router := campaignRoutes(h)
+
+	// An encounter with a half-filled row (a skill check with no DC) must NOT
+	// release: 422 with the list of gaps so the client can point the GM at each.
+	rec := do(t, router, http.MethodPost, encPath,
+		`{"name":"WIP","content":[{"id":"sc","type":"skill_check","skill_check":{"skill":"Perception"}}]}`)
+	var enc model.Encounter
+	_ = json.Unmarshal(rec.Body.Bytes(), &enc)
+	base := encPath + "/" + enc.ID
+
+	rec = do(t, router, http.MethodPost, base+"/release", "")
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("release with gaps = %d, want 422; body=%s", rec.Code, rec.Body)
+	}
+	var gapBody struct {
+		Incomplete []model.ContentGap `json:"incomplete"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &gapBody)
+	if len(gapBody.Incomplete) != 1 || gapBody.Incomplete[0].ItemID != "sc" ||
+		len(gapBody.Incomplete[0].Missing) != 1 || gapBody.Incomplete[0].Missing[0] != "DC" {
+		t.Fatalf("gap payload wrong: %+v", gapBody.Incomplete)
+	}
+
+	// ?force=true releases anyway (an intentionally-sparse room).
+	rec = do(t, router, http.MethodPost, base+"/release?force=true", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("forced release = %d, want 200; body=%s", rec.Code, rec.Body)
+	}
+	var released model.Encounter
+	_ = json.Unmarshal(rec.Body.Bytes(), &released)
+	if released.Status != model.StatusReleased {
+		t.Fatalf("forced release did not set status: %+v", released)
+	}
+}
+
+func TestRelease_CompleteContentReleasesWithoutForce(t *testing.T) {
+	h, _ := newHandler(t, true, 0)
+	router := campaignRoutes(h)
+	// A room that's just a finished text block has no gaps → releases normally.
+	rec := do(t, router, http.MethodPost, encPath,
+		`{"name":"Story","content":[{"id":"md","type":"markdown","markdown":{"body":"The reeds whisper."}}]}`)
+	var enc model.Encounter
+	_ = json.Unmarshal(rec.Body.Bytes(), &enc)
+	rec = do(t, router, http.MethodPost, encPath+"/"+enc.ID+"/release", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("release of complete content = %d, want 200; body=%s", rec.Code, rec.Body)
+	}
+}
+
 func TestUpdate_HappyPathAndStatusTransition(t *testing.T) {
 	h, _ := newHandler(t, true, 0)
 	router := campaignRoutes(h)

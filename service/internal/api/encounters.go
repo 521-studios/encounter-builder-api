@@ -189,6 +189,19 @@ func (h *handler) releaseEncounter(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusConflict, errBody("encounter already released"))
 		return
 	}
+	// Draft→done completeness gate (rvd4): releasing is where half-filled content
+	// rows must be finished (save-time validation is only structural). Block the
+	// release with the list of gaps so the client can point the GM at each, unless
+	// ?force=true — an explicit "release anyway" for intentionally-sparse rooms.
+	if r.URL.Query().Get("force") != "true" {
+		if gaps := model.IncompleteContent(enc.Content); len(gaps) > 0 {
+			writeJSON(w, http.StatusUnprocessableEntity, map[string]any{
+				"error":      "encounter has unfinished content; finish it or release with ?force=true",
+				"incomplete": gaps,
+			})
+			return
+		}
+	}
 	now := time.Now().UTC()
 	enc.Status = model.StatusReleased
 	enc.ReleasedAt = &now
