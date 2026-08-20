@@ -185,3 +185,79 @@ func TestContentRef_isEmpty(t *testing.T) {
 		}
 	}
 }
+
+func TestIncompleteContent(t *testing.T) {
+	goodRef := ContentRef{GameID: "g"}
+	// A fully-finished, mixed encounter — plus a text-only room and an empty list —
+	// must report NO gaps (the gate flags half-filled rows, not missing categories).
+	complete := []ContentItem{
+		{ID: "md", Type: ContentMarkdown, Markdown: &TextBlock{Body: "read aloud"}},
+		{ID: "mon", Type: ContentMonster, Monster: &MonsterEntry{Ref: goodRef, Count: 2}},
+		{ID: "sc", Type: ContentSkillCheck, SkillCheck: &SkillCheck{Skill: "Perception", DC: 12,
+			Alternatives: []SkillOption{{Skill: "Nature", DC: 10}}}},
+		{ID: "pool", Type: ContentPool, Pool: &PoolHeader{Name: "altar", Gate: &Gate{Skill: "Perception", DC: 18}}},
+		{ID: "tr", Type: ContentTreasure, Treasure: &TreasureLine{Ref: goodRef, Qty: 1}},
+		{ID: "coin", Type: ContentCoin, Coin: &Currency{GP: 5}},
+		{ID: "xp", Type: ContentXPAward, XPAward: &XPAward{Amount: 30}},
+		{ID: "rw", Type: ContentReward, Reward: &Reward{Kind: RewardInformation, Label: "lore"}},
+	}
+	if gaps := IncompleteContent(complete); len(gaps) != 0 {
+		t.Fatalf("complete content reported gaps: %+v", gaps)
+	}
+	if gaps := IncompleteContent(nil); len(gaps) != 0 {
+		t.Fatalf("empty content reported gaps: %+v", gaps)
+	}
+
+	// Each half-filled row reports its own missing field(s), keyed by item id.
+	incomplete := []ContentItem{
+		{ID: "md", Type: ContentBoxText, Markdown: &TextBlock{Body: "  "}}, // blank body
+		{ID: "mon", Type: ContentMonster, Monster: &MonsterEntry{}},        // no ref, count 0
+		{ID: "haz", Type: ContentHazard, Monster: &MonsterEntry{Ref: goodRef, Count: 1, // loadout row unset
+			Loadout: []LoadoutItem{{}}}},
+		{ID: "sc", Type: ContentSkillCheck, SkillCheck: &SkillCheck{Skill: "Perception"}}, // no DC
+		{ID: "sc2", Type: ContentSkillCheck, SkillCheck: &SkillCheck{Skill: "Thievery", DC: 20, // bad alt
+			Alternatives: []SkillOption{{Skill: "", DC: 0}}}},
+		{ID: "pool", Type: ContentPool, Pool: &PoolHeader{Gate: &Gate{DC: 0}}}, // no name, bad gate
+		{ID: "tr", Type: ContentTreasure, Treasure: &TreasureLine{Qty: 0}},     // no item, qty 0
+		{ID: "coin", Type: ContentCoin, Coin: &Currency{}},                     // all zero
+		{ID: "xp", Type: ContentXPAward, XPAward: &XPAward{}},                  // amount 0
+		{ID: "rw", Type: ContentReward, Reward: &Reward{Kind: "bogus"}},        // bad kind, no label
+	}
+	gaps := IncompleteContent(incomplete)
+	got := map[string][]string{}
+	for _, g := range gaps {
+		got[g.ItemID] = g.Missing
+	}
+	want := map[string][]string{
+		"md":   {"text"},
+		"mon":  {"creature", "count"},
+		"haz":  {"equipment item"},
+		"sc":   {"DC"},
+		"sc2":  {"alternative skill/DC"},
+		"pool": {"pool name", "gate skill", "gate DC"},
+		"tr":   {"item", "quantity"},
+		"coin": {"amount"},
+		"xp":   {"XP amount"},
+		"rw":   {"kind", "label"},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("gap count = %d, want %d; gaps=%+v", len(got), len(want), gaps)
+	}
+	for id, wm := range want {
+		if !equalStrings(got[id], wm) {
+			t.Errorf("item %q missing = %v, want %v", id, got[id], wm)
+		}
+	}
+}
+
+func equalStrings(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}

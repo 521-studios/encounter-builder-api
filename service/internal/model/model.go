@@ -7,6 +7,7 @@ package model
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -539,6 +540,120 @@ func validateTreasurePayload(t *TreasureLine, at string) error {
 		}
 	}
 	return nil
+}
+
+// ContentGap names one content item that was STARTED but not finished — a monster
+// row with no creature picked, a skill check with no DC, a labelless reward. ItemID
+// + Type let the client jump to it; Missing lists the empty required fields in
+// human terms ("creature", "DC", "pool name").
+type ContentGap struct {
+	ItemID  string      `json:"item_id"`
+	Type    ContentType `json:"type"`
+	Missing []string    `json:"missing"`
+}
+
+// IncompleteContent reports the half-filled content items in an encounter — the
+// draft→done completeness gate (rvd4). This is DELIBERATELY separate from
+// Validate(): a save accepts an in-progress item so no work is lost, but releasing
+// (draft→done) is where the GM is driven to finish. It flags STARTED-but-unfinished
+// rows, NOT missing categories — a room that's just a complete text block, or has no
+// treasure by design, has no gaps. An empty content list has no gaps.
+func IncompleteContent(items []ContentItem) []ContentGap {
+	var gaps []ContentGap
+	add := func(id string, t ContentType, missing ...string) {
+		if len(missing) > 0 {
+			gaps = append(gaps, ContentGap{ItemID: id, Type: t, Missing: missing})
+		}
+	}
+	blank := func(s string) bool { return strings.TrimSpace(s) == "" }
+	for _, c := range items {
+		var m []string
+		switch c.Type {
+		case ContentMarkdown, ContentBoxText:
+			if c.Markdown == nil || blank(c.Markdown.Body) {
+				m = append(m, "text")
+			}
+		case ContentMonster, ContentHazard, ContentAffliction:
+			if c.Monster == nil || c.Monster.Ref.isEmpty() {
+				m = append(m, creatureFieldLabel(c.Type))
+			}
+			if c.Monster != nil && c.Monster.Count < 1 {
+				m = append(m, "count")
+			}
+			if c.Monster != nil {
+				for _, lo := range c.Monster.Loadout {
+					if lo.Ref.isEmpty() {
+						m = append(m, "equipment item")
+						break
+					}
+				}
+			}
+		case ContentSkillCheck:
+			s := c.SkillCheck
+			if s == nil || blank(s.Skill) {
+				m = append(m, "skill")
+			}
+			if s == nil || s.DC < 1 {
+				m = append(m, "DC")
+			}
+			if s != nil {
+				for _, alt := range s.Alternatives {
+					if blank(alt.Skill) || alt.DC < 1 {
+						m = append(m, "alternative skill/DC")
+						break
+					}
+				}
+			}
+		case ContentPool:
+			if c.Pool == nil || blank(c.Pool.Name) {
+				m = append(m, "pool name")
+			}
+			if c.Pool != nil && c.Pool.Gate != nil {
+				if blank(c.Pool.Gate.Skill) {
+					m = append(m, "gate skill")
+				}
+				if c.Pool.Gate.DC < 1 {
+					m = append(m, "gate DC")
+				}
+			}
+		case ContentTreasure:
+			if c.Treasure == nil || c.Treasure.Ref.isEmpty() {
+				m = append(m, "item")
+			}
+			if c.Treasure != nil && c.Treasure.Qty < 1 {
+				m = append(m, "quantity")
+			}
+		case ContentCoin:
+			if c.Coin == nil || (c.Coin.CP == 0 && c.Coin.SP == 0 && c.Coin.GP == 0 && c.Coin.PP == 0) {
+				m = append(m, "amount")
+			}
+		case ContentXPAward:
+			if c.XPAward == nil || c.XPAward.Amount < 1 {
+				m = append(m, "XP amount")
+			}
+		case ContentReward:
+			if c.Reward == nil || !validRewardKinds[c.Reward.Kind] {
+				m = append(m, "kind")
+			}
+			if c.Reward == nil || blank(c.Reward.Label) {
+				m = append(m, "label")
+			}
+		}
+		add(c.ID, c.Type, m...)
+	}
+	return gaps
+}
+
+// creatureFieldLabel names the "pick a thing" field per creature-ish content type.
+func creatureFieldLabel(t ContentType) string {
+	switch t {
+	case ContentHazard:
+		return "hazard"
+	case ContentAffliction:
+		return "affliction"
+	default:
+		return "creature"
+	}
 }
 
 // EncounterInput is the client-writable shape for create/update. Keeping it
