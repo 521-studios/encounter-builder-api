@@ -50,8 +50,10 @@ func TestReleasePayload_SkipsBlankAndPrunedTreasure(t *testing.T) {
 		{ID: "nilpay", Type: model.ContentTreasure, Treasure: nil},                        // no payload
 		treasureItem("gone", "Weapons:2", 1, model.TreasureDestroyed),                     // GM destroyed
 		treasureItem("drunk", "Potions:1", 1, model.TreasureConsumed),                     // GM consumed
+		treasureItem("zeroqty", "Weapons:4", 0, model.TreasureIntact),                     // qty 0 → skipped (would 400 the whole push)
 		treasureItem("keep", "Weapons:3", 1, model.TreasureIntact),                        // the only survivor
 		{ID: "zerocoin", Type: model.ContentCoin, Coin: &model.Currency{}},                // zero coins, harmless
+		{ID: "nilcoin", Type: model.ContentCoin, Coin: nil},                               // nil coin payload → skipped
 	}}
 	items, coins := ReleasePayloadFromEncounter(enc)
 	if len(items) != 1 || items[0].Ref.GameID != "Weapons:3" {

@@ -66,6 +66,11 @@ func ReleasePayloadFromEncounter(enc model.Encounter) (items []ItemInput, coins 
 			if t.State == model.TreasureConsumed || t.State == model.TreasureDestroyed {
 				continue // the GM pruned it; it never reaches the party
 			}
+			if t.Qty < 1 {
+				continue // a qty-0 line (allowed at save / via ?force) would fail
+				// party-treasure's qty>=1 validation and 400 the WHOLE push — skip it
+				// so the rest of the loot + coins still land.
+			}
 			items = append(items, ItemInput{
 				Ref:        t.Ref,
 				Name:       "", // the API stores refs opaquely; party-treasure resolves the display name
