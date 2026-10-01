@@ -2,6 +2,9 @@ package partytreasure
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"io"
 	"net/http"
 	"strings"
@@ -73,13 +76,18 @@ func TestReleasePayload_EmptyContent(t *testing.T) {
 
 // --- light signing test: the Client builds a signed POST to the right URL ---
 
-type fakeSigner struct{ called bool }
+type fakeSigner struct {
+	called      bool
+	payloadHash string
+}
 
 func (f *fakeSigner) SignHTTP(_ context.Context, _ aws.Credentials, r *http.Request,
 	payloadHash, service, region string, _ time.Time, _ ...func(*v4.SignerOptions)) error {
 	f.called = true
+	f.payloadHash = payloadHash
 	r.Header.Set("Authorization", "AWS4-HMAC-SHA256 ...")
-	r.Header.Set("X-Amz-Content-Sha256", payloadHash)
+	// NOTE: the real aws-sdk-go-v2 v4 signer does NOT set X-Amz-Content-Sha256 — the
+	// CLIENT must set it before signing. Don't set it here, or we'd mask that bug.
 	return nil
 }
 
@@ -127,8 +135,17 @@ func TestClient_PushRelease_SignsAndPosts(t *testing.T) {
 	if got := dr.req.URL.String(); got != "https://pt.example.com/api/party/parties/g1/releases" {
 		t.Fatalf("url = %s", got)
 	}
-	if dr.req.Header.Get("X-Amz-Content-Sha256") == "" {
-		t.Fatal("x-amz-content-sha256 not set by the signer")
+	// The client (not the signer) must set X-Amz-Content-Sha256 to the body hash,
+	// both as a sent header and as the payloadHash it signs with — otherwise the IAM
+	// Function URL 403s a bodied POST.
+	wantBody, _ := json.Marshal(ReleaseInput{ClientULID: "enc1", Coins: model.Currency{GP: 5}})
+	sum := sha256.Sum256(wantBody)
+	wantHash := hex.EncodeToString(sum[:])
+	if got := dr.req.Header.Get("X-Amz-Content-Sha256"); got != wantHash {
+		t.Fatalf("x-amz-content-sha256 header = %q, want %q (client must set it)", got, wantHash)
+	}
+	if sg.payloadHash != wantHash {
+		t.Fatalf("signed payloadHash = %q, want %q", sg.payloadHash, wantHash)
 	}
 }
 

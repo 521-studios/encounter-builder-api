@@ -146,10 +146,14 @@ func (c *Client) PushRelease(ctx context.Context, gameID string, in ReleaseInput
 	if err != nil {
 		return fmt.Errorf("partytreasure: retrieve creds: %w", err)
 	}
-	// A bodied request to an IAM Function URL (and behind CloudFront OAC) must carry
-	// x-amz-content-sha256; the v4 signer sets it from the payload hash we pass.
+	// A bodied request to an IAM Function URL must carry x-amz-content-sha256 AS A
+	// SIGNED HEADER — the v4 SignHTTP does NOT add it (it only uses the payload hash
+	// for the canonical request), so set it ourselves BEFORE signing so it's both
+	// signed and sent. Without it the Function URL's SigV4 check 403s a bodied POST.
 	sum := sha256.Sum256(body)
-	if err := c.signer.SignHTTP(ctx, creds, req, hex.EncodeToString(sum[:]), "lambda", c.region, time.Now()); err != nil {
+	hash := hex.EncodeToString(sum[:])
+	req.Header.Set("X-Amz-Content-Sha256", hash)
+	if err := c.signer.SignHTTP(ctx, creds, req, hash, "lambda", c.region, time.Now()); err != nil {
 		return fmt.Errorf("partytreasure: sign: %w", err)
 	}
 
