@@ -11,6 +11,7 @@ import (
 	"github.com/521studios/encounter-builder-api/internal/auth"
 	"github.com/521studios/encounter-builder-api/internal/letsroll"
 	"github.com/521studios/encounter-builder-api/internal/model"
+	"github.com/521studios/encounter-builder-api/internal/partytreasure"
 	"github.com/521studios/encounter-builder-api/internal/store"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
@@ -696,6 +697,94 @@ func TestRelease_CompleteContentReleasesWithoutForce(t *testing.T) {
 	rec = do(t, router, http.MethodPost, encPath+"/"+enc.ID+"/release", "")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("release of complete content = %d, want 200; body=%s", rec.Code, rec.Body)
+	}
+}
+
+// stubReleaser records the ReleaseInput it was handed; err makes PushRelease fail.
+type stubReleaser struct {
+	calls  int
+	gameID string
+	got    partytreasure.ReleaseInput
+	err    error
+}
+
+func (s *stubReleaser) PushRelease(_ context.Context, gameID string, in partytreasure.ReleaseInput) error {
+	s.calls++
+	s.gameID = gameID
+	s.got = in
+	return s.err
+}
+
+const lootContent = `{"name":"Loot","content":[` +
+	`{"id":"t1","type":"treasure","treasure":{"ref":{"game_id":"Weapons:1"},"qty":2}},` +
+	`{"id":"c1","type":"coin","coin":{"gp":10,"sp":5}}]}`
+
+// A successful release pushes the mapped loot to party-treasure, keyed by the
+// encounter id (idempotency), and still returns 200.
+func TestRelease_PushesLootToPartyTreasure(t *testing.T) {
+	h, _ := newHandler(t, true, 0)
+	rel := &stubReleaser{}
+	h.cfg.PartyTreasure = rel
+	router := campaignRoutes(h)
+
+	rec := do(t, router, http.MethodPost, encPath, lootContent)
+	var enc model.Encounter
+	_ = json.Unmarshal(rec.Body.Bytes(), &enc)
+
+	rec = do(t, router, http.MethodPost, encPath+"/"+enc.ID+"/release", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("release = %d, want 200; body=%s", rec.Code, rec.Body)
+	}
+	if rel.calls != 1 {
+		t.Fatalf("PushRelease calls = %d, want 1", rel.calls)
+	}
+	if rel.gameID != "g1" {
+		t.Fatalf("push gameID = %q, want g1", rel.gameID)
+	}
+	if rel.got.ClientULID != enc.ID {
+		t.Fatalf("client_ulid = %q, want encounter id %q", rel.got.ClientULID, enc.ID)
+	}
+	if len(rel.got.Items) != 1 || rel.got.Items[0].Ref.GameID != "Weapons:1" || rel.got.Items[0].Qty != 2 {
+		t.Fatalf("items not mapped: %+v", rel.got.Items)
+	}
+	if rel.got.Coins != (model.Currency{GP: 10, SP: 5}) {
+		t.Fatalf("coins not mapped: %+v", rel.got.Coins)
+	}
+}
+
+// A push failure is best-effort: the release still succeeds (status released, 200).
+func TestRelease_PushFailureStillSucceeds(t *testing.T) {
+	h, _ := newHandler(t, true, 0)
+	h.cfg.PartyTreasure = &stubReleaser{err: errBoom}
+	router := campaignRoutes(h)
+
+	rec := do(t, router, http.MethodPost, encPath, lootContent)
+	var enc model.Encounter
+	_ = json.Unmarshal(rec.Body.Bytes(), &enc)
+
+	rec = do(t, router, http.MethodPost, encPath+"/"+enc.ID+"/release", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("release with failing push = %d, want 200 (best-effort); body=%s", rec.Code, rec.Body)
+	}
+	var released model.Encounter
+	_ = json.Unmarshal(rec.Body.Bytes(), &released)
+	if released.Status != model.StatusReleased || released.ReleasedAt == nil {
+		t.Fatalf("release did not commit despite push failure: %+v", released)
+	}
+}
+
+// With no PartyTreasure configured (nil), release works and nothing is pushed.
+func TestRelease_PushDisabledWhenNil(t *testing.T) {
+	h, _ := newHandler(t, true, 0) // newHandler leaves PartyTreasure nil
+	router := campaignRoutes(h)
+
+	rec := do(t, router, http.MethodPost, encPath, lootContent)
+	var enc model.Encounter
+	_ = json.Unmarshal(rec.Body.Bytes(), &enc)
+
+	rec = do(t, router, http.MethodPost, encPath+"/"+enc.ID+"/release", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("release with push disabled = %d, want 200; body=%s", rec.Code, rec.Body)
 	}
 }
 

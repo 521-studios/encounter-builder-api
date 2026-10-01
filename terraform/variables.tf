@@ -15,6 +15,11 @@ variable "lambda_zip_path" {
   default     = "../function.zip"
 }
 
+variable "tf_state_bucket" {
+  description = "S3 bucket holding this env's terraform state — also where party-treasure-api's remote state is read from (§5b). Matches the backend bucket passed at init."
+  type        = string
+}
+
 variable "oidc_issuer" {
   description = "lets-roll OIDC issuer this env verifies tokens against"
   type        = string

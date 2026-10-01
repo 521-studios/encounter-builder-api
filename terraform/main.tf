@@ -73,6 +73,37 @@ resource "aws_iam_role_policy_attachment" "basic" {
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
 }
 
+# party-treasure-api's remote state — read its Function URL + ARN so releases can
+# be pushed to it (§5b). Same state bucket this env's backend uses.
+data "terraform_remote_state" "party_treasure" {
+  backend = "s3"
+  config = {
+    bucket = var.tf_state_bucket
+    key    = "party-treasure-api/${var.env}/terraform.tfstate"
+    region = "us-east-2"
+  }
+}
+
+# Let the encounter execution role invoke party-treasure's AWS_IAM Function URL —
+# the SigV4 identity party-treasure authorizes the service release by (slice 5a).
+data "aws_iam_policy_document" "party_treasure_invoke" {
+  statement {
+    actions   = ["lambda:InvokeFunctionUrl"]
+    resources = [data.terraform_remote_state.party_treasure.outputs.lambda_function_arn]
+    condition {
+      test     = "StringEquals"
+      variable = "lambda:FunctionUrlAuthType"
+      values   = ["AWS_IAM"]
+    }
+  }
+}
+
+resource "aws_iam_role_policy" "party_treasure_invoke" {
+  name   = "${local.name}-party-treasure-invoke"
+  role   = aws_iam_role.lambda.id
+  policy = data.aws_iam_policy_document.party_treasure_invoke.json
+}
+
 data "aws_iam_policy_document" "dynamo" {
   statement {
     actions = [
@@ -115,10 +146,11 @@ resource "aws_lambda_function" "api" {
 
   environment {
     variables = {
-      ENV              = var.env
-      ENCOUNTERS_TABLE = aws_dynamodb_table.encounters.name
-      OIDC_ISSUER      = var.oidc_issuer
-      OIDC_AUDIENCE    = var.oidc_audience
+      ENV                = var.env
+      ENCOUNTERS_TABLE   = aws_dynamodb_table.encounters.name
+      OIDC_ISSUER        = var.oidc_issuer
+      OIDC_AUDIENCE      = var.oidc_audience
+      PARTY_TREASURE_URL = data.terraform_remote_state.party_treasure.outputs.lambda_function_url
     }
   }
 

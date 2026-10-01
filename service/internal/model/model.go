@@ -40,6 +40,11 @@ func (r ContentRef) isEmpty() bool {
 	return r.GameID == "" && baseEmpty && len(r.Modifications) == 0 && len(r.JSON) == 0
 }
 
+// IsEmpty reports whether the ref names no content — the exported form of isEmpty
+// for cross-package loot filtering (the partytreasure release push skips blank
+// treasure lines).
+func (r ContentRef) IsEmpty() bool { return r.isEmpty() }
+
 // Adjustment is the PF2e elite/weak template applied to a monster (±1 level).
 type Adjustment string
 
