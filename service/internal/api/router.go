@@ -10,6 +10,7 @@ import (
 
 	"github.com/521studios/encounter-builder-api/internal/auth"
 	"github.com/521studios/encounter-builder-api/internal/letsroll"
+	"github.com/521studios/encounter-builder-api/internal/partytreasure"
 	"github.com/521studios/encounter-builder-api/internal/store"
 	"github.com/go-chi/chi/v5"
 )
@@ -20,6 +21,9 @@ type Config struct {
 	Env      string
 	Store    *store.Store
 	LetsRoll *letsroll.Client
+	// PartyTreasure, when non-nil, receives a released encounter's loot (best-effort,
+	// §5b). Nil disables the push (no PARTY_TREASURE_URL — local/unconfigured).
+	PartyTreasure partytreasure.Releaser
 }
 
 // NewRouter wires the routes. The same *chi.Mux is served by cmd/lambda (via the

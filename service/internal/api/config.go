@@ -7,6 +7,7 @@ import (
 
 	"github.com/521studios/encounter-builder-api/internal/auth"
 	"github.com/521studios/encounter-builder-api/internal/letsroll"
+	"github.com/521studios/encounter-builder-api/internal/partytreasure"
 	"github.com/521studios/encounter-builder-api/internal/store"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
@@ -44,10 +45,16 @@ func BuildConfig(ctx context.Context, envDefault string) (Config, error) {
 		env = envDefault
 	}
 
-	return Config{
+	cfg := Config{
 		Auth:     verifier,
 		Env:      env,
 		Store:    store.New(dynamodb.NewFromConfig(awsCfg), table),
 		LetsRoll: letsroll.New(issuer),
-	}, nil
+	}
+	// §5b: push released loot to party-treasure when its Function URL is configured.
+	// Empty (local/unset) leaves PartyTreasure nil and the handler skips the push.
+	if url := os.Getenv("PARTY_TREASURE_URL"); url != "" {
+		cfg.PartyTreasure = partytreasure.New(url, awsCfg.Credentials, awsCfg.Region)
+	}
+	return cfg, nil
 }

@@ -12,6 +12,7 @@ import (
 	"github.com/521studios/encounter-builder-api/internal/auth"
 	"github.com/521studios/encounter-builder-api/internal/letsroll"
 	"github.com/521studios/encounter-builder-api/internal/model"
+	"github.com/521studios/encounter-builder-api/internal/partytreasure"
 	"github.com/521studios/encounter-builder-api/internal/store"
 	"github.com/go-chi/chi/v5"
 )
@@ -209,6 +210,20 @@ func (h *handler) releaseEncounter(w http.ResponseWriter, r *http.Request) {
 	if err := h.cfg.Store.Put(r.Context(), enc); err != nil {
 		writeJSON(w, http.StatusInternalServerError, errBody("could not release encounter"))
 		return
+	}
+	// Release is committed. Best-effort push the loot to party-treasure (§5b):
+	// idempotent by the encounter id, so a re-release won't duplicate. A push
+	// failure is logged and does NOT fail the release — the loot is already released.
+	if h.cfg.PartyTreasure != nil {
+		items, coins := partytreasure.ReleasePayloadFromEncounter(enc)
+		if err := h.cfg.PartyTreasure.PushRelease(r.Context(), enc.CampaignID, partytreasure.ReleaseInput{
+			ClientULID: enc.ID,
+			Items:      items,
+			Coins:      coins,
+		}); err != nil {
+			slog.WarnContext(r.Context(), "releaseEncounter: party-treasure push failed (release still succeeded)",
+				"encounter", enc.ID, "campaign", enc.CampaignID, "error", err)
+		}
 	}
 	writeJSON(w, http.StatusOK, enc)
 }

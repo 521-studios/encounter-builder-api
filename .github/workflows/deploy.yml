@@ -71,7 +71,8 @@ jobs:
         run: |
           set -o pipefail
           tofu plan -input=false -no-color -out=tfplan \
-            -var="env=staging" -var="oidc_issuer=${OIDC_ISSUER}"
+            -var="env=staging" -var="oidc_issuer=${OIDC_ISSUER}" \
+            -var="tf_state_bucket=${TF_STATE_BUCKET}"
       - name: Guard against unreviewed destroys
         working-directory: terraform
         run: |
@@ -141,7 +142,8 @@ jobs:
         run: |
           set -o pipefail
           tofu plan -input=false -no-color -out=tfplan \
-            -var="env=production" -var="oidc_issuer=${OIDC_ISSUER}"
+            -var="env=production" -var="oidc_issuer=${OIDC_ISSUER}" \
+            -var="tf_state_bucket=${TF_STATE_BUCKET}"
       - name: Guard against unreviewed destroys
         working-directory: terraform
         run: |
