@@ -88,13 +88,14 @@ data "terraform_remote_state" "party_treasure" {
 # the SigV4 identity party-treasure authorizes the service release by (slice 5a).
 data "aws_iam_policy_document" "party_treasure_invoke" {
   statement {
-    actions   = ["lambda:InvokeFunctionUrl"]
+    # Invoking a Lambda Function URL needs BOTH grants — InvokeFunctionUrl AND
+    # InvokeFunction — the same pair every CloudFront→Function-URL grant uses
+    # (see infra-frontend's *-cf modules). With only InvokeFunctionUrl the SigV4
+    # call 403s at the Function URL gate. No FunctionUrlAuthType condition: it
+    # only constrains InvokeFunctionUrl, the URL has a single auth type (AWS_IAM),
+    # and the grant is already scoped to this one function ARN.
+    actions   = ["lambda:InvokeFunctionUrl", "lambda:InvokeFunction"]
     resources = [data.terraform_remote_state.party_treasure.outputs.lambda_function_arn]
-    condition {
-      test     = "StringEquals"
-      variable = "lambda:FunctionUrlAuthType"
-      values   = ["AWS_IAM"]
-    }
   }
 }
 
