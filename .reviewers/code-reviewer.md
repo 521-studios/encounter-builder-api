@@ -77,3 +77,5 @@ For each finding, emit a comment with:
 - **Suggested fix** — minimal change with code snippet when applicable
 
 Filter aggressively. False positives erode trust. If you can't quote the rule or you can't prove the bug, don't post.
+
+**Fix suggestions for shared state:** never suggest a mutex or other lock (this repo forbids them). Suggest channel-owned state (one goroutine owns it; channels are its interface) or making the state request-scoped.
