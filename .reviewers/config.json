@@ -1,0 +1,23 @@
+{
+  "bots": {
+    "gemini": false
+  },
+  "overlap_acknowledged": {
+    "test-coverage-reviewer": {
+      "overlaps_with": "pr-test-analyzer",
+      "reason": "Different lenses: test-coverage-reviewer enforces hard rules (touched code must be covered; new branches must be asserted). pr-test-analyzer scores behavioral gaps on a criticality 1-10 axis. Both contribute independent signal during review loops."
+    },
+    "concurrency-reviewer": {
+      "overlaps_with": "code-reviewer",
+      "reason": "code-reviewer lists races generically; concurrency-reviewer owns goroutines, channels and locks and code-reviewer defers to it."
+    },
+    "resource-leak-reviewer": {
+      "overlaps_with": "code-reviewer",
+      "reason": "code-reviewer lists resource leaks generically; resource-leak-reviewer owns bodies, fds and caches and code-reviewer defers to it."
+    },
+    "external-process-reviewer": {
+      "overlaps_with": "resource-leak-reviewer",
+      "reason": "Both mention exec.Command: external-process-reviewer owns timeouts, args and stderr; resource-leak-reviewer only flags a missing Wait()."
+    }
+  }
+}
