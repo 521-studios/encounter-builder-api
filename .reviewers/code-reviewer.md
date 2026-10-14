@@ -78,4 +78,4 @@ For each finding, emit a comment with:
 
 Filter aggressively. False positives erode trust. If you can't quote the rule or you can't prove the bug, don't post.
 
-**Fix suggestions for shared state:** never suggest a mutex or other lock (this repo forbids them). Suggest channel-owned state (one goroutine owns it; channels are its interface) or making the state request-scoped.
+**Fix suggestions for shared state:** default to channel-owned state, not a mutex or other lock (this repo treats locks as an exception that needs a stated reason). Suggest channel-owned state (one goroutine owns it; channels are its interface) or making the state request-scoped.

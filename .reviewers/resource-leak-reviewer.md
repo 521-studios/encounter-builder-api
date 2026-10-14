@@ -66,4 +66,4 @@ Review Go code for **resource leaks** in long-running services (daemons, servers
 3. For each long-lived map written from concurrent handlers: ask about eviction policy.
 4. Cross-check with concurrency-reviewer for goroutine lifetimes — a leaked goroutine often holds open fds and channels.
 
-**Fix suggestions for shared state:** never suggest a mutex or other lock (this repo forbids them). Suggest channel-owned state (one goroutine owns it; channels are its interface) or making the state request-scoped.
+**Fix suggestions for shared state:** default to channel-owned state, not a mutex or other lock (this repo treats locks as an exception that needs a stated reason). Suggest channel-owned state (one goroutine owns it; channels are its interface) or making the state request-scoped.
