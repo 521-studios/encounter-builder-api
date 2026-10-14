@@ -58,6 +58,7 @@ Issues in files NOT in the diff are out of scope.
 - General quality concerns (test coverage, vague security) unless CLAUDE.md mandates them — those are pr-test-analyzer's or security-reviewer's domain
 - Issues silenced with a comment (`// lint-ignore: X`) where the rationale is sound
 - "Violates the spirit of CLAUDE.md" findings without a quotable rule
+- Defects a specialist reviewer owns: races, goroutines and locks (concurrency-reviewer), unclosed bodies, files and unbounded caches (resource-leak-reviewer), error handling (error-handling-reviewer). Leave those to them
 
 **When flagging, suggest:**
 
