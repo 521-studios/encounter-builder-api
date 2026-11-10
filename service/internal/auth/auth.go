@@ -16,7 +16,6 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/lestrrat-go/jwx/v2/jwk"
@@ -47,18 +46,17 @@ type Config struct {
 
 // Verifier validates bearer tokens against a cached JWKS. jwksURL is resolved
 // via OIDC discovery and may be empty until the first authed request if the
-// provider was unreachable at startup (see NewVerifier). mu guards jwksURL.
+// provider was unreachable at startup (see NewVerifier).
 //
-// Why a mutex, not channel-owned state: this is a retryable init-once guard on a
-// single string. sync.Once can't retry after a failed discovery, and an owner
-// goroutine would add a lifecycle (start/stop with the Lambda) to protect one
-// field. Once resolved, the lock is held only for an uncontended nil-check.
+// sem is a 1-slot channel: holding the slot is what owns jwksURL. A channel, not
+// a Mutex, so a request queued behind a slow discovery gives up on its OWN ctx
+// rather than waiting out the holder's fetch (and sync.Once can't retry).
 type Verifier struct {
 	issuer     string
 	audience   string
 	httpClient *http.Client
 	cache      *jwk.Cache
-	mu         sync.Mutex
+	sem        chan struct{}
 	jwksURL    string
 }
 
@@ -92,13 +90,16 @@ func NewVerifier(ctx context.Context, cfg Config) (*Verifier, error) {
 		audience:   cfg.Audience,
 		httpClient: httpClient,
 		cache:      jwk.NewCache(context.WithoutCancel(ctx)),
+		sem:        make(chan struct{}, 1),
 	}
 
-	if cfg.JWKSURL != "" {
-		if err := v.register(cfg.JWKSURL); err != nil {
+	var err error
+	jwksURL := cfg.JWKSURL
+	if jwksURL != "" {
+		if err := v.register(jwksURL); err != nil {
 			return nil, err
 		}
-	} else if _, err := v.resolve(ctx); err != nil {
+	} else if jwksURL, err = v.resolve(ctx); err != nil {
 		slog.Warn("auth: OIDC discovery failed at startup; will retry on first authed request",
 			"issuer", cfg.Issuer, "err", err)
 	}
@@ -106,9 +107,6 @@ func NewVerifier(ctx context.Context, cfg Config) (*Verifier, error) {
 	// Best-effort warm when the jwks url is known, so a healthy boot serves the
 	// first authed request without a fetch stall. A blip is fine — the first
 	// authed request triggers the fetch; a persistent failure is a 401 there.
-	v.mu.Lock()
-	jwksURL := v.jwksURL
-	v.mu.Unlock()
 	if jwksURL != "" {
 		if _, err := v.cache.Refresh(ctx, jwksURL); err != nil {
 			slog.Warn("auth: initial JWKS fetch failed; will retry on first request",
@@ -119,7 +117,7 @@ func NewVerifier(ctx context.Context, cfg Config) (*Verifier, error) {
 	return v, nil
 }
 
-// register adds jwksURL to the cache and records it. The caller holds v.mu
+// register adds jwksURL to the cache and records it. The caller holds v.sem
 // (resolve) or runs at init before the Verifier is shared.
 func (v *Verifier) register(jwksURL string) error {
 	if err := v.cache.Register(jwksURL,
@@ -132,12 +130,14 @@ func (v *Verifier) register(jwksURL string) error {
 	return nil
 }
 
-// resolve returns the jwks url, discovering + registering it on first need.
-// Idempotent — a no-op once resolved — and serialized by v.mu so concurrent
-// first requests discover exactly once.
+// resolve returns the jwks url, discovering and registering it on first need.
 func (v *Verifier) resolve(ctx context.Context) (string, error) {
-	v.mu.Lock()
-	defer v.mu.Unlock()
+	select {
+	case v.sem <- struct{}{}:
+	case <-ctx.Done():
+		return "", ctx.Err()
+	}
+	defer func() { <-v.sem }()
 	if v.jwksURL != "" {
 		return v.jwksURL, nil
 	}

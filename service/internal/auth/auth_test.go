@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -26,6 +27,10 @@ type testProvider struct {
 	issuer   string
 	signKey  jwk.Key // private, kid set
 	audience string
+
+	down        atomic.Bool   // discovery 503s while set
+	stall       chan struct{} // if non-nil, discovery blocks until closed
+	discoveries atomic.Int32  // discovery requests served
 }
 
 func newTestProvider(t *testing.T) *testProvider {
@@ -50,6 +55,18 @@ func newTestProvider(t *testing.T) *testProvider {
 	tp := &testProvider{signKey: priv, audience: "encounter-builder-web"}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/.well-known/openid-configuration", func(w http.ResponseWriter, r *http.Request) {
+		tp.discoveries.Add(1)
+		if tp.stall != nil {
+			select {
+			case <-tp.stall:
+			case <-r.Context().Done():
+				return
+			}
+		}
+		if tp.down.Load() {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
 		_ = json.NewEncoder(w).Encode(map[string]string{
 			"issuer":   tp.issuer,
 			"jwks_uri": tp.issuer + "/oauth/discovery/keys",
@@ -295,76 +312,24 @@ func TestVerify_RejectsMissingAudience(t *testing.T) {
 	}
 }
 
-// vm9m: OIDC discovery must not be a fatal startup dependency. An unreachable
-// provider at boot yields a working Verifier (discovery is retried on first
-// authed use), not an init error — otherwise lets-roll staging's nightly
-// scale-to-zero crashes every cold start into a 502 at the edge.
 func TestNewVerifier_NonFatalWhenDiscoveryUnreachable(t *testing.T) {
 	v, err := NewVerifier(context.Background(), Config{Issuer: "http://127.0.0.1:1"})
 	if err != nil {
 		t.Fatalf("NewVerifier must tolerate an unreachable provider at startup: %v", err)
 	}
-	// A verify attempt retries discovery and fails gracefully (→ 401), not a crash.
 	if _, err := v.Verify(context.Background(), "x.y.z"); err == nil {
 		t.Fatal("Verify should error while the provider is unreachable")
 	}
 }
 
-// downThenUpProvider serves OIDC discovery that 503s until up is set, then a
-// JWKS for priv. discoveries counts successful discovery responses.
-func downThenUpProvider(t *testing.T) (issuer string, priv jwk.Key, up, discoveries *atomic.Int32) {
-	t.Helper()
-	raw, err := rsa.GenerateKey(rand.Reader, 2048)
-	if err != nil {
-		t.Fatalf("gen key: %v", err)
-	}
-	priv, _ = jwk.FromRaw(raw)
-	_ = priv.Set(jwk.KeyIDKey, "test-key-1")
-	_ = priv.Set(jwk.AlgorithmKey, jwa.RS256)
-	pub, _ := priv.PublicKey()
-	pubSet := jwk.NewSet()
-	_ = pubSet.AddKey(pub)
-
-	up, discoveries = new(atomic.Int32), new(atomic.Int32)
-	mux := http.NewServeMux()
-	mux.HandleFunc("/.well-known/openid-configuration", func(w http.ResponseWriter, r *http.Request) {
-		if up.Load() == 0 {
-			w.WriteHeader(http.StatusServiceUnavailable)
-			return
-		}
-		discoveries.Add(1)
-		_ = json.NewEncoder(w).Encode(map[string]string{"issuer": issuer, "jwks_uri": issuer + "/keys"})
-	})
-	mux.HandleFunc("/keys", func(w http.ResponseWriter, _ *http.Request) { _ = json.NewEncoder(w).Encode(pubSet) })
-	srv := httptest.NewServer(mux)
-	t.Cleanup(srv.Close)
-	issuer = srv.URL
-	return issuer, priv, up, discoveries
-}
-
-func signTestToken(t *testing.T, issuer string, priv jwk.Key) string {
-	t.Helper()
-	tok, _ := jwt.NewBuilder().Issuer(issuer).Subject("42").Audience([]string{"encounter-builder-web"}).
-		IssuedAt(time.Now()).Expiration(time.Now().Add(15 * time.Minute)).Build()
-	signed, err := jwt.Sign(tok, jwt.WithKey(jwa.RS256, priv))
-	if err != nil {
-		t.Fatalf("sign: %v", err)
-	}
-	return string(signed)
-}
-
-// vm9m: a provider that is DOWN at startup and comes UP later must work — the
-// first authed request resolves discovery lazily and verifies.
 func TestNewVerifier_RecoversAfterStartupDiscoveryDown(t *testing.T) {
-	issuer, priv, up, _ := downThenUpProvider(t)
+	tp := newTestProvider(t)
+	defer tp.close()
+	tp.down.Store(true)
+	v := tp.verifier(t)
 
-	v, err := NewVerifier(context.Background(), Config{Issuer: issuer, Audience: "encounter-builder-web"})
-	if err != nil {
-		t.Fatalf("NewVerifier must tolerate a down provider at startup: %v", err)
-	}
-
-	up.Store(1)
-	got, err := v.Verify(context.Background(), signTestToken(t, issuer, priv))
+	tp.down.Store(false)
+	got, err := v.Verify(context.Background(), tp.mint(t, nil))
 	if err != nil {
 		t.Fatalf("Verify after provider recovery: %v", err)
 	}
@@ -373,32 +338,80 @@ func TestNewVerifier_RecoversAfterStartupDiscoveryDown(t *testing.T) {
 	}
 }
 
-// vm9m: concurrent first requests after a deferred discovery all verify and
-// discover exactly once (resolve's mutex). Run under -race.
-func TestVerify_ConcurrentFirstRequestsDiscoverOnce(t *testing.T) {
-	issuer, priv, up, discoveries := downThenUpProvider(t)
-	v, err := NewVerifier(context.Background(), Config{Issuer: issuer, Audience: "encounter-builder-web"})
-	if err != nil {
-		t.Fatalf("NewVerifier: %v", err)
-	}
-	up.Store(1)
-	signed := signTestToken(t, issuer, priv)
+func TestVerify_ConcurrentFirstUseDiscoversOnce(t *testing.T) {
+	tp := newTestProvider(t)
+	defer tp.close()
+	tp.down.Store(true)
+	v := tp.verifier(t)
+	tp.discoveries.Store(0)
+	tp.down.Store(false)
 
-	const n = 20
-	errs := make(chan error, n)
-	for range n {
+	tok := tp.mint(t, nil)
+	var wg sync.WaitGroup
+	errs := make(chan error, 8)
+	for range 8 {
+		wg.Add(1)
 		go func() {
-			_, err := v.Verify(context.Background(), signed)
+			defer wg.Done()
+			_, err := v.Verify(context.Background(), tok)
 			errs <- err
 		}()
 	}
-	for range n {
-		if err := <-errs; err != nil {
-			t.Errorf("concurrent Verify: %v", err)
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("Verify: %v", err)
 		}
 	}
-	if got := discoveries.Load(); got != 1 {
-		t.Fatalf("discovery ran %d times, want exactly 1", got)
+	if n := tp.discoveries.Load(); n != 1 {
+		t.Fatalf("discovery ran %d times, want 1", n)
+	}
+}
+
+// A request queued behind a hung discovery must give up on its own deadline,
+// not wait out the holder's fetch.
+func TestVerify_WaiterHonoursOwnContext(t *testing.T) {
+	tp := newTestProvider(t)
+	defer tp.close()
+	tp.down.Store(true)
+	v := tp.verifier(t)
+	tp.discoveries.Store(0)
+	tp.stall = make(chan struct{})
+	defer close(tp.stall)
+
+	go func() { _, _ = v.Verify(context.Background(), "x.y.z") }() // holds the slot
+	for tp.discoveries.Load() == 0 {
+		time.Sleep(time.Millisecond)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	if _, err := v.Verify(ctx, "x.y.z"); err == nil {
+		t.Fatal("Verify should fail while discovery is hung")
+	}
+	if d := time.Since(start); d > time.Second {
+		t.Fatalf("waiter took %v; it should give up on its own 50ms ctx", d)
+	}
+}
+
+func TestNewVerifier_JWKSURLSkipsDiscovery(t *testing.T) {
+	tp := newTestProvider(t)
+	defer tp.close()
+	v, err := NewVerifier(context.Background(), Config{
+		Issuer:   tp.issuer,
+		Audience: tp.audience,
+		JWKSURL:  tp.issuer + "/oauth/discovery/keys",
+	})
+	if err != nil {
+		t.Fatalf("NewVerifier: %v", err)
+	}
+	if _, err := v.Verify(context.Background(), tp.mint(t, nil)); err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	if n := tp.discoveries.Load(); n != 0 {
+		t.Fatalf("discovery ran %d times with JWKSURL set, want 0", n)
 	}
 }
 
