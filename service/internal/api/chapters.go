@@ -99,7 +99,7 @@ func (h *handler) updateChapter(w http.ResponseWriter, r *http.Request) {
 		ch.MapPositions = *in.MapPositions
 	}
 	// map_image: omit keeps, null removes, an object sets (see applyMapImage).
-	if !h.applyMapImage(w, r, &ch, in.MapImage) {
+	if !h.applyMapImage(w, r, &ch.MapImage, mapKeyPrefix(ch.CampaignID, ch.ID), in.MapImage) {
 		return
 	}
 	ch.UpdatedAt = time.Now().UTC()

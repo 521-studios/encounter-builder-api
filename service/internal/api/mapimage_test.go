@@ -241,3 +241,104 @@ func TestMapImage_CreateRejectsAnImage(t *testing.T) {
 		t.Fatalf("create with null image = %d, want 201", rec.Code)
 	}
 }
+
+// encMapFixture creates encounter "e" in campaign g1 with a fake map store holding one
+// uploaded png under the encounter's own prefix.
+func encMapFixture(t *testing.T) (http.Handler, *fakeMaps, string, string) {
+	t.Helper()
+	h, _ := newHandler(t, true, 0)
+	fm := &fakeMaps{objects: map[string]string{}}
+	h.cfg.Maps = fm
+	router := campaignRoutes(h)
+	rec := do(t, router, http.MethodPost, encPath, `{"name":"E","map_region":{"x":-10,"y":20,"w":300,"h":200}}`)
+	var enc model.Encounter
+	if err := json.Unmarshal(rec.Body.Bytes(), &enc); err != nil || enc.ID == "" {
+		t.Fatalf("create encounter: %d %s", rec.Code, rec.Body)
+	}
+	if enc.MapRegion == nil || *enc.MapRegion != (model.MapRegion{X: -10, Y: 20, W: 300, H: 200}) {
+		t.Fatalf("create must store map_region: %+v", enc.MapRegion)
+	}
+	key := "maps/g1/encounters/" + enc.ID + "/a.png"
+	fm.objects[key] = "image/png"
+	return router, fm, encPath + "/" + enc.ID, key
+}
+
+func putEncounter(t *testing.T, router http.Handler, path, extra string) (int, model.Encounter) {
+	t.Helper()
+	rec := do(t, router, http.MethodPut, path, `{"name":"E"`+extra+`}`)
+	var enc model.Encounter
+	_ = json.Unmarshal(rec.Body.Bytes(), &enc)
+	return rec.Code, enc
+}
+
+func TestEncounterMapRegion_KeepReplaceClearReject(t *testing.T) {
+	router, _, path, _ := encMapFixture(t)
+	// A save that doesn't send map_region (an older client) must not wipe it.
+	if code, enc := putEncounter(t, router, path, ""); code != http.StatusOK || enc.MapRegion == nil || enc.MapRegion.W != 300 {
+		t.Fatalf("omit = %d %+v, want region kept", code, enc.MapRegion)
+	}
+	if code, enc := putEncounter(t, router, path, `,"map_region":{"x":1,"y":2,"w":3,"h":4}`); code != http.StatusOK || *enc.MapRegion != (model.MapRegion{X: 1, Y: 2, W: 3, H: 4}) {
+		t.Fatalf("replace = %d %+v", code, enc.MapRegion)
+	}
+	if code, enc := putEncounter(t, router, path, `,"map_region":null`); code != http.StatusOK || enc.MapRegion != nil {
+		t.Fatalf("null = %d %+v, want cleared", code, enc.MapRegion)
+	}
+	for _, bad := range []string{
+		`{"x":0,"y":0,"w":0,"h":4}`,
+		`{"x":0,"y":0,"w":4,"h":-1}`,
+		`{"x":0,"y":0,"w":131073,"h":4}`,
+		`{"x":-131073,"y":0,"w":4,"h":4}`,
+		`{"x":0,"y":0,"w":4,"h":4,"z":1}`,
+	} {
+		if code, _ := putEncounter(t, router, path, `,"map_region":`+bad); code != http.StatusBadRequest {
+			t.Errorf("map_region %s = %d, want 400", bad, code)
+		}
+	}
+}
+
+func TestEncounterMapImage_UploadSetPresentRemove(t *testing.T) {
+	router, fm, path, key := encMapFixture(t)
+	rec := do(t, router, http.MethodPost, path+"/map-image/upload-url", `{"content_type":"image/png"}`)
+	var up struct {
+		Key string `json:"key"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &up)
+	if rec.Code != http.StatusOK || !strings.HasPrefix(up.Key, "maps/g1/encounters/"+strings.TrimPrefix(path, encPath+"/")+"/") {
+		t.Fatalf("upload-url = %d key=%q", rec.Code, up.Key)
+	}
+	if rec := do(t, router, http.MethodPost, encPath+"/nope/map-image/upload-url", `{"content_type":"image/png"}`); rec.Code != http.StatusNotFound {
+		t.Fatalf("missing encounter = %d, want 404", rec.Code)
+	}
+
+	code, enc := putEncounter(t, router, path, `,"map_image":{"key":"`+key+`","width":640,"height":480}`)
+	if code != http.StatusOK || enc.MapImage == nil || enc.MapImage.URL != "/"+key || len(fm.cleared) != 1 {
+		t.Fatalf("set = %d %+v cleared=%v", code, enc.MapImage, fm.cleared)
+	}
+	// Omit keeps it, and get + list present the URL.
+	if code, enc = putEncounter(t, router, path, ""); code != http.StatusOK || enc.MapImage == nil {
+		t.Fatalf("omit = %d %+v, want kept", code, enc.MapImage)
+	}
+	var got model.Encounter
+	_ = json.Unmarshal(do(t, router, http.MethodGet, path, "").Body.Bytes(), &got)
+	var list []model.Encounter
+	_ = json.Unmarshal(do(t, router, http.MethodGet, encPath, "").Body.Bytes(), &list)
+	if got.MapImage == nil || got.MapImage.URL != "/"+key || len(list) != 1 || list[0].MapImage == nil || list[0].MapImage.URL != "/"+key {
+		t.Fatalf("get/list must present url: get=%+v list=%+v", got.MapImage, list)
+	}
+	if code, enc = putEncounter(t, router, path, `,"map_image":null`); code != http.StatusOK || enc.MapImage != nil {
+		t.Fatalf("null = %d %+v, want removed", code, enc.MapImage)
+	}
+}
+
+func TestEncounterMapImage_Rejects(t *testing.T) {
+	router, fm, path, _ := encMapFixture(t)
+	// A chapter-map key (or another encounter's) can't be claimed by this encounter.
+	chapterKey := "maps/g1/ch1/a.png"
+	fm.objects[chapterKey] = "image/png"
+	if code, _ := putEncounter(t, router, path, `,"map_image":{"key":"`+chapterKey+`","width":1,"height":1}`); code != http.StatusBadRequest {
+		t.Fatalf("foreign key = %d, want 400", code)
+	}
+	if rec := do(t, router, http.MethodPost, encPath, `{"name":"N","map_image":{"key":"x","width":1,"height":1}}`); rec.Code != http.StatusBadRequest {
+		t.Fatalf("create with image = %d, want 400", rec.Code)
+	}
+}

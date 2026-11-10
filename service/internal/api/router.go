@@ -63,6 +63,7 @@ func NewRouter(cfg Config) *chi.Mux {
 			r.Put("/{encounterID}", h.updateEncounter)
 			r.Delete("/{encounterID}", h.deleteEncounter)
 			r.Post("/{encounterID}/release", h.releaseEncounter)
+			r.Post("/{encounterID}/map-image/upload-url", h.encounterMapImageUploadURL)
 		})
 
 		// Chapters: campaign subdivisions grouping encounters in the GM sidebar.
