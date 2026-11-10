@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -291,6 +292,70 @@ func TestVerify_RejectsMissingAudience(t *testing.T) {
 	signed, _ := jwt.Sign(tok, jwt.WithKey(jwa.RS256, tp.signKey))
 	if _, err := v.Verify(context.Background(), string(signed)); err == nil {
 		t.Fatal("token with no audience claim was accepted despite a required audience")
+	}
+}
+
+// vm9m: OIDC discovery must not be a fatal startup dependency. An unreachable
+// provider at boot yields a working Verifier (discovery is retried on first
+// authed use), not an init error — otherwise lets-roll staging's nightly
+// scale-to-zero crashes every cold start into a 502 at the edge.
+func TestNewVerifier_NonFatalWhenDiscoveryUnreachable(t *testing.T) {
+	v, err := NewVerifier(context.Background(), Config{Issuer: "http://127.0.0.1:1"})
+	if err != nil {
+		t.Fatalf("NewVerifier must tolerate an unreachable provider at startup: %v", err)
+	}
+	// A verify attempt retries discovery and fails gracefully (→ 401), not a crash.
+	if _, err := v.Verify(context.Background(), "x.y.z"); err == nil {
+		t.Fatal("Verify should error while the provider is unreachable")
+	}
+}
+
+// vm9m: a provider that is DOWN at startup and comes UP later must work — the
+// first authed request resolves discovery lazily and verifies.
+func TestNewVerifier_RecoversAfterStartupDiscoveryDown(t *testing.T) {
+	raw, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("gen key: %v", err)
+	}
+	priv, _ := jwk.FromRaw(raw)
+	_ = priv.Set(jwk.KeyIDKey, "test-key-1")
+	_ = priv.Set(jwk.AlgorithmKey, jwa.RS256)
+	pub, _ := priv.PublicKey()
+	pubSet := jwk.NewSet()
+	_ = pubSet.AddKey(pub)
+
+	var up atomic.Bool
+	var issuer string
+	mux := http.NewServeMux()
+	mux.HandleFunc("/.well-known/openid-configuration", func(w http.ResponseWriter, r *http.Request) {
+		if !up.Load() {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]string{"issuer": issuer, "jwks_uri": issuer + "/keys"})
+	})
+	mux.HandleFunc("/keys", func(w http.ResponseWriter, _ *http.Request) { _ = json.NewEncoder(w).Encode(pubSet) })
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	issuer = srv.URL
+
+	// Boot while discovery 503s — must not fail.
+	v, err := NewVerifier(context.Background(), Config{Issuer: issuer, Audience: "encounter-builder-web"})
+	if err != nil {
+		t.Fatalf("NewVerifier must tolerate a down provider at startup: %v", err)
+	}
+
+	// Provider recovers; the first Verify resolves discovery lazily and verifies.
+	up.Store(true)
+	tok, _ := jwt.NewBuilder().Issuer(issuer).Subject("42").Audience([]string{"encounter-builder-web"}).
+		IssuedAt(time.Now()).Expiration(time.Now().Add(15 * time.Minute)).Build()
+	signed, _ := jwt.Sign(tok, jwt.WithKey(jwa.RS256, priv))
+	got, err := v.Verify(context.Background(), string(signed))
+	if err != nil {
+		t.Fatalf("Verify after provider recovery: %v", err)
+	}
+	if got.Subject() != "42" {
+		t.Fatalf("subject = %q, want 42", got.Subject())
 	}
 }
 
