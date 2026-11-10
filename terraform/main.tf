@@ -122,6 +122,13 @@ data "aws_iam_policy_document" "maps" {
     actions   = ["s3:PutObject", "s3:PutObjectTagging", "s3:GetObject"]
     resources = ["${aws_s3_bucket.maps.arn}/maps/*"]
   }
+  statement {
+    # Without ListBucket, S3 answers HeadObject on a missing key with 403, not 404,
+    # so "not uploaded" would look like an S3 failure. No s3:prefix condition:
+    # HeadObject carries no prefix, so one would deny the very call this is for.
+    actions   = ["s3:ListBucket"]
+    resources = [aws_s3_bucket.maps.arn]
+  }
 }
 
 resource "aws_iam_role_policy" "maps" {

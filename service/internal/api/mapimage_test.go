@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 	"testing"
@@ -16,14 +17,22 @@ type fakeMaps struct {
 	objects map[string]string
 	heads   []string
 	cleared []string
+	// Set to make the matching S3 call fail.
+	presignErr, headErr, clearErr error
 }
 
 func (f *fakeMaps) PresignUpload(_ context.Context, key, ct string) (string, map[string]string, error) {
+	if f.presignErr != nil {
+		return "", nil, f.presignErr
+	}
 	return "https://bucket.test", map[string]string{"key": key, "Content-Type": ct}, nil
 }
 
 func (f *fakeMaps) ContentType(_ context.Context, key string) (string, error) {
 	f.heads = append(f.heads, key)
+	if f.headErr != nil {
+		return "", f.headErr
+	}
 	ct, ok := f.objects[key]
 	if !ok {
 		return "", maps.ErrNotFound
@@ -32,6 +41,9 @@ func (f *fakeMaps) ContentType(_ context.Context, key string) (string, error) {
 }
 
 func (f *fakeMaps) ClearPending(_ context.Context, key string) error {
+	if f.clearErr != nil {
+		return f.clearErr
+	}
 	f.cleared = append(f.cleared, key)
 	return nil
 }
@@ -175,6 +187,7 @@ func TestMapImage_Rejects(t *testing.T) {
 		"scale 0":             `{"key":"` + key + `","width":1,"height":1,"scale":0}`,
 		"scale 4.5":           `{"key":"` + key + `","width":1,"height":1,"scale":4.5}`,
 		"zero width":          `{"key":"` + key + `","width":0,"height":1}`,
+		"huge height":         `{"key":"` + key + `","width":1,"height":32769}`,
 		"url is GET-only":     `{"key":"` + key + `","url":"/x","width":1,"height":1}`,
 		"other chapter's key": `{"key":"maps/g1/other/a.png","width":1,"height":1}`,
 		"nested key":          `{"key":"` + strings.Replace(key, "a.png", "x/a.png", 1) + `","width":1,"height":1}`,
@@ -188,5 +201,43 @@ func TestMapImage_Rejects(t *testing.T) {
 	}
 	if len(fm.cleared) != 0 {
 		t.Fatalf("rejected saves must not clear any tag: %v", fm.cleared)
+	}
+}
+
+func TestMapImage_S3FailuresAreServerErrors(t *testing.T) {
+	boom := errors.New("s3 down")
+	img := func(key string) string { return `{"key":"` + key + `","width":1,"height":1}` }
+
+	router, fm, path, key := mapFixture(t)
+	fm.presignErr = boom
+	if rec := do(t, router, http.MethodPost, path+"/map-image/upload-url", `{"content_type":"image/png"}`); rec.Code != http.StatusInternalServerError {
+		t.Fatalf("presign failure = %d, want 500", rec.Code)
+	}
+	fm.headErr = boom
+	if code, _ := putChapter(t, router, path, img(key)); code != http.StatusBadGateway {
+		t.Fatalf("HeadObject failure = %d, want 502", code)
+	}
+	fm.headErr = nil
+	fm.clearErr = boom
+	code, _ := putChapter(t, router, path, img(key))
+	if code != http.StatusBadGateway {
+		t.Fatalf("PutObjectTagging failure = %d, want 502", code)
+	}
+	// A failed save must not have stored the image.
+	rec := do(t, router, http.MethodGet, chPath, "")
+	if strings.Contains(rec.Body.String(), "map_image") {
+		t.Fatalf("failed save stored the image: %s", rec.Body)
+	}
+}
+
+func TestMapImage_CreateRejectsAnImage(t *testing.T) {
+	h, _ := newHandler(t, true, 0)
+	h.cfg.Maps = &fakeMaps{objects: map[string]string{}}
+	router := chapterRoutes(h)
+	if rec := do(t, router, http.MethodPost, chPath, `{"name":"Ch","map_image":{"key":"maps/g1/x/a.png","width":1,"height":1}}`); rec.Code != http.StatusBadRequest {
+		t.Fatalf("create with image = %d, want 400", rec.Code)
+	}
+	if rec := do(t, router, http.MethodPost, chPath, `{"name":"Ch","map_image":null}`); rec.Code != http.StatusCreated {
+		t.Fatalf("create with null image = %d, want 201", rec.Code)
 	}
 }

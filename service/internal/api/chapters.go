@@ -38,14 +38,16 @@ func (h *handler) createChapter(w http.ResponseWriter, r *http.Request) {
 	if in.MapPositions != nil {
 		ch.MapPositions = *in.MapPositions
 	}
-	if !h.applyMapImage(w, r, &ch, in.MapImage) {
+	// An upload needs the chapter's ID, so a new chapter can't carry an image yet.
+	if in.MapImage.Value != nil {
+		writeJSON(w, http.StatusBadRequest, errBody("map_image can only be set on an existing chapter"))
 		return
 	}
 	if err := h.cfg.Store.PutChapter(r.Context(), ch); err != nil {
 		writeJSON(w, http.StatusInternalServerError, errBody("could not save chapter"))
 		return
 	}
-	writeJSON(w, http.StatusCreated, presentChapter(ch))
+	writeJSON(w, http.StatusCreated, ch)
 }
 
 func (h *handler) listChapters(w http.ResponseWriter, r *http.Request) {

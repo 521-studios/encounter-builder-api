@@ -4,6 +4,10 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -58,5 +62,55 @@ func TestPresignUpload_PolicyPinsTypeSizeTagAndCache(t *testing.T) {
 		if !strings.Contains(doc, want) {
 			t.Errorf("policy missing %s\n%s", want, doc)
 		}
+	}
+}
+
+// fakeS3 answers HEAD with 404 for "missing" and image/png otherwise, and records
+// the tagging PUT body.
+func fakeS3(t *testing.T) (*Store, *string) {
+	t.Helper()
+	var tagging string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodHead && strings.HasSuffix(r.URL.Path, "/missing"):
+			w.WriteHeader(http.StatusNotFound)
+		case r.Method == http.MethodHead:
+			w.Header().Set("Content-Type", "image/png")
+		case r.Method == http.MethodPut && r.URL.Query().Has("tagging"):
+			b := new(strings.Builder)
+			_, _ = io.Copy(b, r.Body)
+			tagging = b.String()
+		default:
+			t.Errorf("unexpected S3 call %s %s", r.Method, r.URL)
+			w.WriteHeader(http.StatusBadRequest)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	client := s3.New(s3.Options{
+		Region:       "us-east-2",
+		BaseEndpoint: aws.String(srv.URL),
+		UsePathStyle: true,
+		Credentials:  aws.NewCredentialsCache(credentials.NewStaticCredentialsProvider("AKID", "SECRET", "")),
+	})
+	return New(client, "maps-bucket"), &tagging
+}
+
+func TestContentType_MapsMissingToErrNotFound(t *testing.T) {
+	st, _ := fakeS3(t)
+	if ct, err := st.ContentType(context.Background(), "maps/c/ch/x.png"); err != nil || ct != "image/png" {
+		t.Fatalf("present = %q, %v", ct, err)
+	}
+	if _, err := st.ContentType(context.Background(), "maps/c/ch/missing"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("missing err = %v, want ErrNotFound", err)
+	}
+}
+
+func TestClearPending_SendsAnEmptyTagSet(t *testing.T) {
+	st, tagging := fakeS3(t)
+	if err := st.ClearPending(context.Background(), "maps/c/ch/x.png"); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(*tagging, "<TagSet></TagSet>") || strings.Contains(*tagging, "pending") {
+		t.Fatalf("tagging body = %q, want an empty TagSet", *tagging)
 	}
 }

@@ -467,6 +467,9 @@ func (p *MapImagePatch) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
+// maxMapPixels bounds each side, well above any map a 15MB upload can hold.
+const maxMapPixels = 32768
+
 // Resolve validates the input against the chapter's key prefix and applies the
 // defaults.
 func (in MapImageInput) Resolve(keyPrefix string) (MapImage, error) {
@@ -474,8 +477,8 @@ func (in MapImageInput) Resolve(keyPrefix string) (MapImage, error) {
 	if !ok || name == "" || strings.Contains(name, "/") {
 		return MapImage{}, fmt.Errorf("map_image.key must be an object directly under %s", keyPrefix)
 	}
-	if in.Width <= 0 || in.Height <= 0 {
-		return MapImage{}, fmt.Errorf("map_image.width and height must be positive")
+	if in.Width <= 0 || in.Height <= 0 || in.Width > maxMapPixels || in.Height > maxMapPixels {
+		return MapImage{}, fmt.Errorf("map_image.width and height must be between 1 and %d", maxMapPixels)
 	}
 	out := MapImage{Key: in.Key, Width: in.Width, Height: in.Height, Scale: 1}
 	if in.Rotation != nil {
