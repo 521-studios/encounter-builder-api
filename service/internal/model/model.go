@@ -385,8 +385,12 @@ type Encounter struct {
 	// used for treasure/difficulty budgeting. nil means "inherit" — the client
 	// resolves encounter -> chapter -> campaign settings -> app default. The API
 	// stores the raw override; it does not resolve inheritance.
-	PartyLevel *int       `json:"party_level,omitempty"`
-	PartySize  *int       `json:"party_size,omitempty"`
+	PartyLevel *int `json:"party_level,omitempty"`
+	PartySize  *int `json:"party_size,omitempty"`
+	// MapRegion is the encounter's box on the chapter map; MapImage optionally
+	// overrides that crop with its own uploaded image (muz0.7).
+	MapRegion  *MapRegion `json:"map_region,omitempty"`
+	MapImage   *MapImage  `json:"map_image,omitempty"`
 	ReleasedAt *time.Time `json:"released_at,omitempty"`
 	CreatedAt  time.Time  `json:"created_at"`
 	UpdatedAt  time.Time  `json:"updated_at"`
@@ -443,14 +447,14 @@ type MapImageInput struct {
 	Scale    *float64 `json:"scale,omitempty"`
 }
 
-// MapImagePatch tells omit (keep), null (remove) and an object (set) apart, which a
-// plain pointer can't: encoding/json decodes both omit and null to nil.
-type MapImagePatch struct {
+// Patch tells omit (keep), null (remove) and an object (set) apart, which a plain
+// pointer can't: encoding/json decodes both omit and null to nil.
+type Patch[T any] struct {
 	Set   bool
-	Value *MapImageInput
+	Value *T
 }
 
-func (p *MapImagePatch) UnmarshalJSON(b []byte) error {
+func (p *Patch[T]) UnmarshalJSON(b []byte) error {
 	p.Set = true
 	if string(b) == "null" {
 		p.Value = nil
@@ -459,11 +463,35 @@ func (p *MapImagePatch) UnmarshalJSON(b []byte) error {
 	// A custom unmarshaler doesn't inherit the outer decoder's strictness.
 	dec := json.NewDecoder(bytes.NewReader(b))
 	dec.DisallowUnknownFields()
-	var v MapImageInput
+	var v T
 	if err := dec.Decode(&v); err != nil {
 		return err
 	}
 	p.Value = &v
+	return nil
+}
+
+type MapImagePatch = Patch[MapImageInput]
+
+// MapRegion is an encounter's box on its chapter map (muz0.7), in the chapter map's
+// flow coordinates (the same space as map_positions). The room view crops to it.
+type MapRegion struct {
+	X int `json:"x"`
+	Y int `json:"y"`
+	W int `json:"w"`
+	H int `json:"h"`
+}
+
+// maxMapCoord bounds a region: a maximum-size image at the maximum 4x scale.
+const maxMapCoord = 4 * maxMapPixels
+
+func (m MapRegion) Validate() error {
+	if m.W <= 0 || m.H <= 0 || m.W > maxMapCoord || m.H > maxMapCoord {
+		return fmt.Errorf("map_region.w and h must be between 1 and %d", maxMapCoord)
+	}
+	if m.X < -maxMapCoord || m.X > maxMapCoord || m.Y < -maxMapCoord || m.Y > maxMapCoord {
+		return fmt.Errorf("map_region.x and y must be within ±%d", maxMapCoord)
+	}
 	return nil
 }
 
@@ -773,6 +801,10 @@ type EncounterInput struct {
 	// Status is honored only by update, and only for draft<->run (release has
 	// its own endpoint). Empty means "leave unchanged".
 	Status Status `json:"status,omitempty"`
+	// Unlike the fields above, these are omit-keeps (null clears), so a save that
+	// doesn't know about the map can't wipe it.
+	MapRegion Patch[MapRegion] `json:"map_region"`
+	MapImage  MapImagePatch    `json:"map_image"`
 }
 
 // Validate checks and normalizes the input in place: it fills default enum
@@ -1068,6 +1100,11 @@ func (in *EncounterInput) Validate() error {
 	for _, c := range []int{in.Currency.CP, in.Currency.SP, in.Currency.GP, in.Currency.PP} {
 		if c < 0 {
 			return fmt.Errorf("currency amounts must be >= 0")
+		}
+	}
+	if in.MapRegion.Value != nil {
+		if err := in.MapRegion.Value.Validate(); err != nil {
+			return err
 		}
 	}
 	return validateParty(in.PartyLevel, in.PartySize)

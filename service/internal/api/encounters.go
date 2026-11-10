@@ -88,14 +88,20 @@ func (h *handler) createEncounter(w http.ResponseWriter, r *http.Request) {
 		Currency:        in.Currency,
 		PartyLevel:      in.PartyLevel,
 		PartySize:       in.PartySize,
+		MapRegion:       in.MapRegion.Value,
 		CreatedAt:       now,
 		UpdatedAt:       now,
+	}
+	// An upload needs the encounter's ID, so a new encounter can't carry an image yet.
+	if in.MapImage.Value != nil {
+		writeJSON(w, http.StatusBadRequest, errBody("map_image can only be set on an existing encounter"))
+		return
 	}
 	if err := h.cfg.Store.Put(r.Context(), enc); err != nil {
 		writeJSON(w, http.StatusInternalServerError, errBody("could not save encounter"))
 		return
 	}
-	writeJSON(w, http.StatusCreated, enc)
+	writeJSON(w, http.StatusCreated, presentEncounter(enc))
 }
 
 func (h *handler) listEncounters(w http.ResponseWriter, r *http.Request) {
@@ -103,6 +109,9 @@ func (h *handler) listEncounters(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, errBody("could not list encounters"))
 		return
+	}
+	for i := range list {
+		list[i] = presentEncounter(list[i])
 	}
 	writeJSON(w, http.StatusOK, list)
 }
@@ -112,7 +121,7 @@ func (h *handler) getEncounter(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	writeJSON(w, http.StatusOK, enc)
+	writeJSON(w, http.StatusOK, presentEncounter(enc))
 }
 
 func (h *handler) updateEncounter(w http.ResponseWriter, r *http.Request) {
@@ -162,13 +171,19 @@ func (h *handler) updateEncounter(w http.ResponseWriter, r *http.Request) {
 	if in.Status != "" {
 		existing.Status = in.Status
 	}
+	if in.MapRegion.Set {
+		existing.MapRegion = in.MapRegion.Value
+	}
+	if !h.applyMapImage(w, r, &existing.MapImage, encounterMapKeyPrefix(existing.CampaignID, existing.ID), in.MapImage) {
+		return
+	}
 	existing.UpdatedAt = time.Now().UTC()
 
 	if err := h.cfg.Store.Put(r.Context(), existing); err != nil {
 		writeJSON(w, http.StatusInternalServerError, errBody("could not save encounter"))
 		return
 	}
-	writeJSON(w, http.StatusOK, existing)
+	writeJSON(w, http.StatusOK, presentEncounter(existing))
 }
 
 func (h *handler) deleteEncounter(w http.ResponseWriter, r *http.Request) {
@@ -225,7 +240,7 @@ func (h *handler) releaseEncounter(w http.ResponseWriter, r *http.Request) {
 				"encounter", enc.ID, "campaign", enc.CampaignID, "error", err)
 		}
 	}
-	writeJSON(w, http.StatusOK, enc)
+	writeJSON(w, http.StatusOK, presentEncounter(enc))
 }
 
 // loadEncounter fetches the path-addressed encounter, writing 404/500 and
