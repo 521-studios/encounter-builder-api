@@ -48,6 +48,11 @@ type Config struct {
 // Verifier validates bearer tokens against a cached JWKS. jwksURL is resolved
 // via OIDC discovery and may be empty until the first authed request if the
 // provider was unreachable at startup (see NewVerifier). mu guards jwksURL.
+//
+// Why a mutex, not channel-owned state: this is a retryable init-once guard on a
+// single string. sync.Once can't retry after a failed discovery, and an owner
+// goroutine would add a lifecycle (start/stop with the Lambda) to protect one
+// field. Once resolved, the lock is held only for an uncontended nil-check.
 type Verifier struct {
 	issuer     string
 	audience   string
