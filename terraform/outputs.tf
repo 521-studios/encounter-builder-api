@@ -12,3 +12,16 @@ output "encounters_table" {
   description = "DynamoDB table name"
   value       = aws_dynamodb_table.encounters.name
 }
+
+# Consumed by infra-frontend's encounter-builder-cf (the /maps/* origin and its bucket policy).
+output "maps_bucket_name" {
+  value = aws_s3_bucket.maps.id
+}
+
+output "maps_bucket_arn" {
+  value = aws_s3_bucket.maps.arn
+}
+
+output "maps_bucket_regional_domain" {
+  value = aws_s3_bucket.maps.bucket_regional_domain_name
+}

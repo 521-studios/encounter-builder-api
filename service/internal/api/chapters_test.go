@@ -27,6 +27,7 @@ func chapterRoutes(h *handler) http.Handler {
 		r.Get("/", h.listChapters)
 		r.Put("/{chapterID}", h.updateChapter)
 		r.Delete("/{chapterID}", h.deleteChapter)
+		r.Post("/{chapterID}/map-image/upload-url", h.mapImageUploadURL)
 	})
 	return r
 }

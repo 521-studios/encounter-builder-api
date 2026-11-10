@@ -17,7 +17,8 @@ provider "aws" {
 }
 
 locals {
-  name = "encounter-builder-api-${var.env}"
+  name        = "encounter-builder-api-${var.env}"
+  site_origin = var.env == "production" ? "https://encounters.521studios.com" : "https://encounters.${var.env}.521studios.com"
   tags = {
     Project     = "encounter-builder-api"
     Environment = var.env
@@ -49,6 +50,91 @@ resource "aws_dynamodb_table" "encounters" {
   }
 
   tags = local.tags
+}
+
+# ─── S3: chapter map images (muz0.1) ─────────────────────────────────────────
+# The SPA uploads with a presigned POST, and CloudFront serves /maps/* from here.
+# The bucket POLICY (the CloudFront OAC read grant) lives in infra-frontend's
+# encounter-builder-cf module. Declaring aws_s3_bucket_policy here too would
+# mean two owners clobbering each other. Uploads are tagged state=pending until
+# the chapter save clears the tag, and lifecycle expires abandoned ones.
+resource "aws_s3_bucket" "maps" {
+  bucket = "521studios-${var.env}-encounter-builder-maps"
+  tags   = local.tags
+}
+
+resource "aws_s3_bucket_public_access_block" "maps" {
+  bucket                  = aws_s3_bucket.maps.id
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
+resource "aws_s3_bucket_ownership_controls" "maps" {
+  bucket = aws_s3_bucket.maps.id
+  rule {
+    object_ownership = "BucketOwnerEnforced"
+  }
+}
+
+resource "aws_s3_bucket_server_side_encryption_configuration" "maps" {
+  bucket = aws_s3_bucket.maps.id
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm = "AES256"
+    }
+  }
+}
+
+resource "aws_s3_bucket_lifecycle_configuration" "maps" {
+  bucket = aws_s3_bucket.maps.id
+  rule {
+    id     = "expire-pending-uploads"
+    status = "Enabled"
+    filter {
+      tag {
+        key   = "state"
+        value = "pending"
+      }
+    }
+    expiration {
+      days = 1
+    }
+  }
+}
+
+# The presigned POST goes from the browser straight to S3, so the SPA origin needs CORS.
+resource "aws_s3_bucket_cors_configuration" "maps" {
+  bucket = aws_s3_bucket.maps.id
+  cors_rule {
+    allowed_methods = ["POST"]
+    allowed_origins = [local.site_origin]
+    allowed_headers = ["*"]
+    max_age_seconds = 3000
+  }
+}
+
+data "aws_iam_policy_document" "maps" {
+  statement {
+    # PutObject + PutObjectTagging sign the presigned POST (which sets the tag).
+    # GetObject backs HeadObject. PutObjectTagging also clears the tag on save.
+    actions   = ["s3:PutObject", "s3:PutObjectTagging", "s3:GetObject"]
+    resources = ["${aws_s3_bucket.maps.arn}/maps/*"]
+  }
+  statement {
+    # Without ListBucket, S3 answers HeadObject on a missing key with 403, not 404,
+    # so "not uploaded" would look like an S3 failure. No s3:prefix condition:
+    # HeadObject carries no prefix, so one would deny the very call this is for.
+    actions   = ["s3:ListBucket"]
+    resources = [aws_s3_bucket.maps.arn]
+  }
+}
+
+resource "aws_iam_role_policy" "maps" {
+  name   = "${local.name}-maps"
+  role   = aws_iam_role.lambda.id
+  policy = data.aws_iam_policy_document.maps.json
 }
 
 # ─── IAM ─────────────────────────────────────────────────────────────────────
@@ -152,6 +238,7 @@ resource "aws_lambda_function" "api" {
       OIDC_ISSUER        = var.oidc_issuer
       OIDC_AUDIENCE      = var.oidc_audience
       PARTY_TREASURE_URL = data.terraform_remote_state.party_treasure.outputs.lambda_function_url
+      MAPS_BUCKET        = aws_s3_bucket.maps.id
     }
   }
 

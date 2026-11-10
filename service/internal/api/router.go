@@ -24,6 +24,9 @@ type Config struct {
 	// PartyTreasure, when non-nil, receives a released encounter's loot (best-effort,
 	// §5b). Nil disables the push (no PARTY_TREASURE_URL — local/unconfigured).
 	PartyTreasure partytreasure.Releaser
+	// Maps, when non-nil, stores chapter map images (muz0.1). Nil (no MAPS_BUCKET)
+	// makes the upload and new-key paths return 503.
+	Maps MapStore
 }
 
 // NewRouter wires the routes. The same *chi.Mux is served by cmd/lambda (via the
@@ -69,6 +72,7 @@ func NewRouter(cfg Config) *chi.Mux {
 			r.Get("/", h.listChapters)
 			r.Put("/{chapterID}", h.updateChapter)
 			r.Delete("/{chapterID}", h.deleteChapter)
+			r.Post("/{chapterID}/map-image/upload-url", h.mapImageUploadURL)
 		})
 
 		// Campaign settings: the base of the expected-party inheritance chain.
