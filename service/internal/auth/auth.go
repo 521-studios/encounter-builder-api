@@ -44,17 +44,32 @@ type Config struct {
 	HTTPClient *http.Client
 }
 
-// Verifier validates bearer tokens against a cached JWKS.
+// Verifier validates bearer tokens against a cached JWKS. jwksURL is resolved
+// via OIDC discovery and may be empty until the first authed request if the
+// provider was unreachable at startup (see NewVerifier).
+//
+// sem is a 1-slot channel: holding the slot is what owns jwksURL. A channel, not
+// a Mutex, so a request queued behind a slow discovery gives up on its OWN ctx
+// rather than waiting out the holder's fetch (and sync.Once can't retry).
 type Verifier struct {
-	issuer   string
-	audience string
-	jwksURL  string
-	cache    *jwk.Cache
+	issuer     string
+	audience   string
+	httpClient *http.Client
+	cache      *jwk.Cache
+	sem        chan struct{}
+	jwksURL    string
 }
 
-// NewVerifier discovers the JWKS (unless Config.JWKSURL is set), warms the
-// cache, and returns a Verifier. It fails if the provider is unreachable at
-// startup — the identity provider is a hard dependency, so fail loud.
+// NewVerifier returns a Verifier for the issuer. With Config.JWKSURL set it
+// registers that URL directly (tests); otherwise it discovers the JWKS from the
+// issuer.
+//
+// OIDC discovery is NOT a fatal startup dependency: a transient provider outage
+// (e.g. lets-roll staging's nightly scale-to-zero) would otherwise crash every
+// Lambda cold start into a 502 at the edge. A startup discovery failure is
+// logged and deferred to the first authed request, which retries; the public
+// /healthz and the SigV4 service-release path never touch the provider. JWKS
+// warming is likewise best-effort.
 func NewVerifier(ctx context.Context, cfg Config) (*Verifier, error) {
 	if cfg.Issuer == "" {
 		return nil, errors.New("auth: Issuer is required")
@@ -66,42 +81,74 @@ func NewVerifier(ctx context.Context, cfg Config) (*Verifier, error) {
 	if httpClient == nil {
 		httpClient = http.DefaultClient
 	}
+	// The JWKS cache's background refresh goroutine lives for the ctx passed to
+	// NewCache. Callers hand us a short startup-timeout ctx, which would kill that
+	// goroutine ~30s after boot and freeze key rotation — so detach it (keep
+	// values, drop the deadline). The passed ctx still bounds the startup fetches.
+	v := &Verifier{
+		issuer:     cfg.Issuer,
+		audience:   cfg.Audience,
+		httpClient: httpClient,
+		cache:      jwk.NewCache(context.WithoutCancel(ctx)),
+		sem:        make(chan struct{}, 1),
+	}
 
+	var err error
 	jwksURL := cfg.JWKSURL
-	if jwksURL == "" {
-		var err error
-		jwksURL, err = discoverJWKS(ctx, httpClient, cfg.Issuer)
-		if err != nil {
+	if jwksURL != "" {
+		if err := v.register(jwksURL); err != nil {
 			return nil, err
+		}
+	} else if jwksURL, err = v.resolve(ctx); err != nil {
+		slog.Warn("auth: OIDC discovery failed at startup; will retry on first authed request",
+			"issuer", cfg.Issuer, "err", err)
+	}
+
+	// Best-effort warm when the jwks url is known, so a healthy boot serves the
+	// first authed request without a fetch stall. A blip is fine — the first
+	// authed request triggers the fetch; a persistent failure is a 401 there.
+	if jwksURL != "" {
+		if _, err := v.cache.Refresh(ctx, jwksURL); err != nil {
+			slog.Warn("auth: initial JWKS fetch failed; will retry on first request",
+				"jwks", jwksURL, "err", err)
 		}
 	}
 
-	// The JWKS cache runs a background refresh goroutine whose lifetime is the
-	// context passed to NewCache. Callers hand us a short startup-timeout ctx,
-	// which would kill that goroutine ~30s after boot and freeze key rotation —
-	// so detach it (keep values, drop the deadline). The passed ctx still bounds
-	// only the initial warm fetch below.
-	cache := jwk.NewCache(context.WithoutCancel(ctx))
-	if err := cache.Register(jwksURL,
-		jwk.WithHTTPClient(httpClient),
+	return v, nil
+}
+
+// register adds jwksURL to the cache and records it. The caller holds v.sem
+// (resolve) or runs at init before the Verifier is shared.
+func (v *Verifier) register(jwksURL string) error {
+	if err := v.cache.Register(jwksURL,
+		jwk.WithHTTPClient(v.httpClient),
 		jwk.WithMinRefreshInterval(15*time.Minute),
 	); err != nil {
-		return nil, fmt.Errorf("auth: register jwks: %w", err)
+		return fmt.Errorf("auth: register jwks: %w", err)
 	}
-	// Best-effort warm: don't couple cold start (or the public /healthz) to the
-	// provider being reachable. A blip means the first *authed* request triggers
-	// the fetch; a persistent failure surfaces as a 401 there, not a dead boot.
-	if _, err := cache.Refresh(ctx, jwksURL); err != nil {
-		slog.Warn("auth: initial JWKS fetch failed; will retry on first request",
-			"jwks", jwksURL, "err", err)
-	}
+	v.jwksURL = jwksURL
+	return nil
+}
 
-	return &Verifier{
-		issuer:   cfg.Issuer,
-		audience: cfg.Audience,
-		jwksURL:  jwksURL,
-		cache:    cache,
-	}, nil
+// resolve returns the jwks url, discovering and registering it on first need.
+func (v *Verifier) resolve(ctx context.Context) (string, error) {
+	select {
+	case v.sem <- struct{}{}:
+	case <-ctx.Done():
+		return "", ctx.Err()
+	}
+	defer func() { <-v.sem }()
+	if v.jwksURL != "" {
+		return v.jwksURL, nil
+	}
+	jwksURL, err := discoverJWKS(ctx, v.httpClient, v.issuer)
+	if err != nil {
+		return "", err
+	}
+	if err := v.register(jwksURL); err != nil {
+		return "", err
+	}
+	return v.jwksURL, nil
 }
 
 // discoverJWKS reads jwks_uri from the issuer's OIDC discovery document.
@@ -135,7 +182,13 @@ func discoverJWKS(ctx context.Context, client *http.Client, issuer string) (stri
 // Verify parses and validates a raw bearer token, enforcing signature (against
 // the current JWKS), issuer, expiry, and — when configured — audience.
 func (v *Verifier) Verify(ctx context.Context, raw string) (jwt.Token, error) {
-	set, err := v.cache.Get(ctx, v.jwksURL)
+	// Resolve the jwks url on first use if startup discovery was deferred (the
+	// provider was down at boot); a persistent failure surfaces here as a 401.
+	jwksURL, err := v.resolve(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("auth: jwks unavailable: %w", err)
+	}
+	set, err := v.cache.Get(ctx, jwksURL)
 	if err != nil {
 		return nil, fmt.Errorf("auth: jwks unavailable: %w", err)
 	}
@@ -163,6 +216,7 @@ func (v *Verifier) Middleware(next http.Handler) http.Handler {
 		}
 		tok, err := v.Verify(r.Context(), raw)
 		if err != nil {
+			slog.Warn("auth: token rejected", "err", err)
 			writeUnauthorized(w, "invalid token")
 			return
 		}

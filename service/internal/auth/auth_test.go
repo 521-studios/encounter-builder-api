@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -25,6 +27,10 @@ type testProvider struct {
 	issuer   string
 	signKey  jwk.Key // private, kid set
 	audience string
+
+	down        atomic.Bool   // discovery 503s while set
+	stall       chan struct{} // if non-nil, discovery blocks until closed
+	discoveries atomic.Int32  // discovery requests served
 }
 
 func newTestProvider(t *testing.T) *testProvider {
@@ -49,6 +55,18 @@ func newTestProvider(t *testing.T) *testProvider {
 	tp := &testProvider{signKey: priv, audience: "encounter-builder-web"}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/.well-known/openid-configuration", func(w http.ResponseWriter, r *http.Request) {
+		tp.discoveries.Add(1)
+		if tp.stall != nil {
+			select {
+			case <-tp.stall:
+			case <-r.Context().Done():
+				return
+			}
+		}
+		if tp.down.Load() {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
 		_ = json.NewEncoder(w).Encode(map[string]string{
 			"issuer":   tp.issuer,
 			"jwks_uri": tp.issuer + "/oauth/discovery/keys",
@@ -291,6 +309,109 @@ func TestVerify_RejectsMissingAudience(t *testing.T) {
 	signed, _ := jwt.Sign(tok, jwt.WithKey(jwa.RS256, tp.signKey))
 	if _, err := v.Verify(context.Background(), string(signed)); err == nil {
 		t.Fatal("token with no audience claim was accepted despite a required audience")
+	}
+}
+
+func TestNewVerifier_NonFatalWhenDiscoveryUnreachable(t *testing.T) {
+	v, err := NewVerifier(context.Background(), Config{Issuer: "http://127.0.0.1:1"})
+	if err != nil {
+		t.Fatalf("NewVerifier must tolerate an unreachable provider at startup: %v", err)
+	}
+	if _, err := v.Verify(context.Background(), "x.y.z"); err == nil {
+		t.Fatal("Verify should error while the provider is unreachable")
+	}
+}
+
+func TestNewVerifier_RecoversAfterStartupDiscoveryDown(t *testing.T) {
+	tp := newTestProvider(t)
+	defer tp.close()
+	tp.down.Store(true)
+	v := tp.verifier(t)
+
+	tp.down.Store(false)
+	got, err := v.Verify(context.Background(), tp.mint(t, nil))
+	if err != nil {
+		t.Fatalf("Verify after provider recovery: %v", err)
+	}
+	if got.Subject() != "42" {
+		t.Fatalf("subject = %q, want 42", got.Subject())
+	}
+}
+
+func TestVerify_ConcurrentFirstUseDiscoversOnce(t *testing.T) {
+	tp := newTestProvider(t)
+	defer tp.close()
+	tp.down.Store(true)
+	v := tp.verifier(t)
+	tp.discoveries.Store(0)
+	tp.down.Store(false)
+
+	tok := tp.mint(t, nil)
+	var wg sync.WaitGroup
+	errs := make(chan error, 8)
+	for range 8 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := v.Verify(context.Background(), tok)
+			errs <- err
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("Verify: %v", err)
+		}
+	}
+	if n := tp.discoveries.Load(); n != 1 {
+		t.Fatalf("discovery ran %d times, want 1", n)
+	}
+}
+
+// A request queued behind a hung discovery must give up on its own deadline,
+// not wait out the holder's fetch.
+func TestVerify_WaiterHonoursOwnContext(t *testing.T) {
+	tp := newTestProvider(t)
+	defer tp.close()
+	tp.down.Store(true)
+	v := tp.verifier(t)
+	tp.discoveries.Store(0)
+	tp.stall = make(chan struct{})
+	defer close(tp.stall)
+
+	go func() { _, _ = v.Verify(context.Background(), "x.y.z") }() // holds the slot
+	for tp.discoveries.Load() == 0 {
+		time.Sleep(time.Millisecond)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	if _, err := v.Verify(ctx, "x.y.z"); err == nil {
+		t.Fatal("Verify should fail while discovery is hung")
+	}
+	if d := time.Since(start); d > time.Second {
+		t.Fatalf("waiter took %v; it should give up on its own 50ms ctx", d)
+	}
+}
+
+func TestNewVerifier_JWKSURLSkipsDiscovery(t *testing.T) {
+	tp := newTestProvider(t)
+	defer tp.close()
+	v, err := NewVerifier(context.Background(), Config{
+		Issuer:   tp.issuer,
+		Audience: tp.audience,
+		JWKSURL:  tp.issuer + "/oauth/discovery/keys",
+	})
+	if err != nil {
+		t.Fatalf("NewVerifier: %v", err)
+	}
+	if _, err := v.Verify(context.Background(), tp.mint(t, nil)); err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	if n := tp.discoveries.Load(); n != 0 {
+		t.Fatalf("discovery ran %d times with JWKSURL set, want 0", n)
 	}
 }
 
