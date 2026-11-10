@@ -6,6 +6,7 @@ import (
 	"crypto/rsa"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -388,8 +389,8 @@ func TestVerify_WaiterHonoursOwnContext(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 	start := time.Now()
-	if _, err := v.Verify(ctx, "x.y.z"); err == nil {
-		t.Fatal("Verify should fail while discovery is hung")
+	if _, err := v.Verify(ctx, "x.y.z"); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Verify err = %v, want context.DeadlineExceeded", err)
 	}
 	if d := time.Since(start); d > time.Second {
 		t.Fatalf("waiter took %v; it should give up on its own 50ms ctx", d)
