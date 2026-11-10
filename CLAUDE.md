@@ -32,7 +32,7 @@ signature, so the SPA forwards the OIDC token in `X-Access-Token` (passed throug
 by the CloudFront origin-request-policy). The JWT is fully verified either way.
 
 Env: `OIDC_ISSUER` (required), `OIDC_AUDIENCE` (the SPA client_id), `ENV`,
-`ENCOUNTERS_TABLE`.
+`ENCOUNTERS_TABLE`, `MAPS_BUCKET` (optional; unset makes map uploads 503).
 
 ## Dev
 ```bash

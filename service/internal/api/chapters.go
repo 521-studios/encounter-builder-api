@@ -38,11 +38,14 @@ func (h *handler) createChapter(w http.ResponseWriter, r *http.Request) {
 	if in.MapPositions != nil {
 		ch.MapPositions = *in.MapPositions
 	}
+	if !h.applyMapImage(w, r, &ch, in.MapImage) {
+		return
+	}
 	if err := h.cfg.Store.PutChapter(r.Context(), ch); err != nil {
 		writeJSON(w, http.StatusInternalServerError, errBody("could not save chapter"))
 		return
 	}
-	writeJSON(w, http.StatusCreated, ch)
+	writeJSON(w, http.StatusCreated, presentChapter(ch))
 }
 
 func (h *handler) listChapters(w http.ResponseWriter, r *http.Request) {
@@ -50,6 +53,9 @@ func (h *handler) listChapters(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, errBody("could not list chapters"))
 		return
+	}
+	for i := range list {
+		list[i] = presentChapter(list[i])
 	}
 	writeJSON(w, http.StatusOK, list)
 }
@@ -90,12 +96,16 @@ func (h *handler) updateChapter(w http.ResponseWriter, r *http.Request) {
 	if in.MapPositions != nil {
 		ch.MapPositions = *in.MapPositions
 	}
+	// map_image: omit keeps, null removes, an object sets (see applyMapImage).
+	if !h.applyMapImage(w, r, &ch, in.MapImage) {
+		return
+	}
 	ch.UpdatedAt = time.Now().UTC()
 	if err := h.cfg.Store.PutChapter(r.Context(), ch); err != nil {
 		writeJSON(w, http.StatusInternalServerError, errBody("could not save chapter"))
 		return
 	}
-	writeJSON(w, http.StatusOK, ch)
+	writeJSON(w, http.StatusOK, presentChapter(ch))
 }
 
 func (h *handler) deleteChapter(w http.ResponseWriter, r *http.Request) {

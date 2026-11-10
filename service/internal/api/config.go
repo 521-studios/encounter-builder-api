@@ -7,10 +7,12 @@ import (
 
 	"github.com/521studios/encounter-builder-api/internal/auth"
 	"github.com/521studios/encounter-builder-api/internal/letsroll"
+	"github.com/521studios/encounter-builder-api/internal/maps"
 	"github.com/521studios/encounter-builder-api/internal/partytreasure"
 	"github.com/521studios/encounter-builder-api/internal/store"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
 )
 
 // BuildConfig assembles the router Config from the environment: the OIDC
@@ -55,6 +57,9 @@ func BuildConfig(ctx context.Context, envDefault string) (Config, error) {
 	// Empty (local/unset) leaves PartyTreasure nil and the handler skips the push.
 	if url := os.Getenv("PARTY_TREASURE_URL"); url != "" {
 		cfg.PartyTreasure = partytreasure.New(url, awsCfg.Credentials, awsCfg.Region)
+	}
+	if bucket := os.Getenv("MAPS_BUCKET"); bucket != "" {
+		cfg.Maps = maps.New(s3.NewFromConfig(awsCfg), bucket)
 	}
 	return cfg, nil
 }

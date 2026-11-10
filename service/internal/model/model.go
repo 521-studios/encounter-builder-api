@@ -5,6 +5,7 @@
 package model
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -414,8 +415,84 @@ type Chapter struct {
 	// round-tripped, not interpreted); the frontend reconciles it against the current
 	// rooms (auto-place added, prune removed).
 	MapPositions json.RawMessage `json:"map_positions,omitempty"`
+	MapImage     *MapImage       `json:"map_image,omitempty"`
 	CreatedAt    time.Time       `json:"created_at"`
 	UpdatedAt    time.Time       `json:"updated_at"`
+}
+
+// MapImage is a chapter's uploaded battle-map background (muz0.1). Width/Height are
+// the image's natural pixels. Rotation/Scale are display transforms only, so node
+// positions don't shift when they change. URL is built by the server on read and
+// is never stored or accepted.
+type MapImage struct {
+	Key      string  `json:"key"`
+	URL      string  `json:"url,omitempty"`
+	Width    int     `json:"width"`
+	Height   int     `json:"height"`
+	Rotation int     `json:"rotation"`
+	Scale    float64 `json:"scale"`
+}
+
+// MapImageInput is the client-writable map image (no url). Rotation and Scale are
+// optional and default to 0 and 1.
+type MapImageInput struct {
+	Key      string   `json:"key"`
+	Width    int      `json:"width"`
+	Height   int      `json:"height"`
+	Rotation *int     `json:"rotation,omitempty"`
+	Scale    *float64 `json:"scale,omitempty"`
+}
+
+// MapImagePatch tells omit (keep), null (remove) and an object (set) apart, which a
+// plain pointer can't: encoding/json decodes both omit and null to nil.
+type MapImagePatch struct {
+	Set   bool
+	Value *MapImageInput
+}
+
+func (p *MapImagePatch) UnmarshalJSON(b []byte) error {
+	p.Set = true
+	if string(b) == "null" {
+		p.Value = nil
+		return nil
+	}
+	// A custom unmarshaler doesn't inherit the outer decoder's strictness.
+	dec := json.NewDecoder(bytes.NewReader(b))
+	dec.DisallowUnknownFields()
+	var v MapImageInput
+	if err := dec.Decode(&v); err != nil {
+		return err
+	}
+	p.Value = &v
+	return nil
+}
+
+// Resolve validates the input against the chapter's key prefix and applies the
+// defaults.
+func (in MapImageInput) Resolve(keyPrefix string) (MapImage, error) {
+	name, ok := strings.CutPrefix(in.Key, keyPrefix)
+	if !ok || name == "" || strings.Contains(name, "/") {
+		return MapImage{}, fmt.Errorf("map_image.key must be an object directly under %s", keyPrefix)
+	}
+	if in.Width <= 0 || in.Height <= 0 {
+		return MapImage{}, fmt.Errorf("map_image.width and height must be positive")
+	}
+	out := MapImage{Key: in.Key, Width: in.Width, Height: in.Height, Scale: 1}
+	if in.Rotation != nil {
+		switch *in.Rotation {
+		case 0, 90, 180, 270:
+			out.Rotation = *in.Rotation
+		default:
+			return MapImage{}, fmt.Errorf("map_image.rotation must be 0, 90, 180 or 270")
+		}
+	}
+	if in.Scale != nil {
+		if *in.Scale < 0.1 || *in.Scale > 4 {
+			return MapImage{}, fmt.Errorf("map_image.scale must be between 0.1 and 4")
+		}
+		out.Scale = *in.Scale
+	}
+	return out, nil
 }
 
 // ChapterInput is the client-writable shape for create/update (server owns
@@ -427,6 +504,7 @@ type ChapterInput struct {
 	PartyLevel   *int             `json:"party_level,omitempty"`
 	PartySize    *int             `json:"party_size,omitempty"`
 	MapPositions *json.RawMessage `json:"map_positions,omitempty"`
+	MapImage     MapImagePatch    `json:"map_image"`
 }
 
 func (in ChapterInput) Validate() error {
