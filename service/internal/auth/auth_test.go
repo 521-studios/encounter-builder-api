@@ -310,52 +310,95 @@ func TestNewVerifier_NonFatalWhenDiscoveryUnreachable(t *testing.T) {
 	}
 }
 
-// vm9m: a provider that is DOWN at startup and comes UP later must work — the
-// first authed request resolves discovery lazily and verifies.
-func TestNewVerifier_RecoversAfterStartupDiscoveryDown(t *testing.T) {
+// downThenUpProvider serves OIDC discovery that 503s until up is set, then a
+// JWKS for priv. discoveries counts successful discovery responses.
+func downThenUpProvider(t *testing.T) (issuer string, priv jwk.Key, up, discoveries *atomic.Int32) {
+	t.Helper()
 	raw, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		t.Fatalf("gen key: %v", err)
 	}
-	priv, _ := jwk.FromRaw(raw)
+	priv, _ = jwk.FromRaw(raw)
 	_ = priv.Set(jwk.KeyIDKey, "test-key-1")
 	_ = priv.Set(jwk.AlgorithmKey, jwa.RS256)
 	pub, _ := priv.PublicKey()
 	pubSet := jwk.NewSet()
 	_ = pubSet.AddKey(pub)
 
-	var up atomic.Bool
-	var issuer string
+	up, discoveries = new(atomic.Int32), new(atomic.Int32)
 	mux := http.NewServeMux()
 	mux.HandleFunc("/.well-known/openid-configuration", func(w http.ResponseWriter, r *http.Request) {
-		if !up.Load() {
+		if up.Load() == 0 {
 			w.WriteHeader(http.StatusServiceUnavailable)
 			return
 		}
+		discoveries.Add(1)
 		_ = json.NewEncoder(w).Encode(map[string]string{"issuer": issuer, "jwks_uri": issuer + "/keys"})
 	})
 	mux.HandleFunc("/keys", func(w http.ResponseWriter, _ *http.Request) { _ = json.NewEncoder(w).Encode(pubSet) })
 	srv := httptest.NewServer(mux)
-	defer srv.Close()
+	t.Cleanup(srv.Close)
 	issuer = srv.URL
+	return issuer, priv, up, discoveries
+}
 
-	// Boot while discovery 503s — must not fail.
+func signTestToken(t *testing.T, issuer string, priv jwk.Key) string {
+	t.Helper()
+	tok, _ := jwt.NewBuilder().Issuer(issuer).Subject("42").Audience([]string{"encounter-builder-web"}).
+		IssuedAt(time.Now()).Expiration(time.Now().Add(15 * time.Minute)).Build()
+	signed, err := jwt.Sign(tok, jwt.WithKey(jwa.RS256, priv))
+	if err != nil {
+		t.Fatalf("sign: %v", err)
+	}
+	return string(signed)
+}
+
+// vm9m: a provider that is DOWN at startup and comes UP later must work — the
+// first authed request resolves discovery lazily and verifies.
+func TestNewVerifier_RecoversAfterStartupDiscoveryDown(t *testing.T) {
+	issuer, priv, up, _ := downThenUpProvider(t)
+
 	v, err := NewVerifier(context.Background(), Config{Issuer: issuer, Audience: "encounter-builder-web"})
 	if err != nil {
 		t.Fatalf("NewVerifier must tolerate a down provider at startup: %v", err)
 	}
 
-	// Provider recovers; the first Verify resolves discovery lazily and verifies.
-	up.Store(true)
-	tok, _ := jwt.NewBuilder().Issuer(issuer).Subject("42").Audience([]string{"encounter-builder-web"}).
-		IssuedAt(time.Now()).Expiration(time.Now().Add(15 * time.Minute)).Build()
-	signed, _ := jwt.Sign(tok, jwt.WithKey(jwa.RS256, priv))
-	got, err := v.Verify(context.Background(), string(signed))
+	up.Store(1)
+	got, err := v.Verify(context.Background(), signTestToken(t, issuer, priv))
 	if err != nil {
 		t.Fatalf("Verify after provider recovery: %v", err)
 	}
 	if got.Subject() != "42" {
 		t.Fatalf("subject = %q, want 42", got.Subject())
+	}
+}
+
+// vm9m: concurrent first requests after a deferred discovery all verify and
+// discover exactly once (resolve's mutex). Run under -race.
+func TestVerify_ConcurrentFirstRequestsDiscoverOnce(t *testing.T) {
+	issuer, priv, up, discoveries := downThenUpProvider(t)
+	v, err := NewVerifier(context.Background(), Config{Issuer: issuer, Audience: "encounter-builder-web"})
+	if err != nil {
+		t.Fatalf("NewVerifier: %v", err)
+	}
+	up.Store(1)
+	signed := signTestToken(t, issuer, priv)
+
+	const n = 20
+	errs := make(chan error, n)
+	for range n {
+		go func() {
+			_, err := v.Verify(context.Background(), signed)
+			errs <- err
+		}()
+	}
+	for range n {
+		if err := <-errs; err != nil {
+			t.Errorf("concurrent Verify: %v", err)
+		}
+	}
+	if got := discoveries.Load(); got != 1 {
+		t.Fatalf("discovery ran %d times, want exactly 1", got)
 	}
 }
 

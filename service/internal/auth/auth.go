@@ -216,6 +216,7 @@ func (v *Verifier) Middleware(next http.Handler) http.Handler {
 		}
 		tok, err := v.Verify(r.Context(), raw)
 		if err != nil {
+			slog.Warn("auth: token rejected", "err", err)
 			writeUnauthorized(w, "invalid token")
 			return
 		}
