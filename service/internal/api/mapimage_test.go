@@ -330,13 +330,53 @@ func TestEncounterMapImage_UploadSetPresentRemove(t *testing.T) {
 	}
 }
 
+func TestEncounterMapImage_ReleasePresentsURL(t *testing.T) {
+	router, _, path, key := encMapFixture(t)
+	if code, _ := putEncounter(t, router, path, `,"map_image":{"key":"`+key+`","width":1,"height":1}`); code != http.StatusOK {
+		t.Fatalf("set = %d", code)
+	}
+	rec := do(t, router, http.MethodPost, path+"/release", "")
+	var enc model.Encounter
+	_ = json.Unmarshal(rec.Body.Bytes(), &enc)
+	if rec.Code != http.StatusOK || enc.MapImage == nil || enc.MapImage.URL != "/"+key {
+		t.Fatalf("release = %d %+v, want url presented", rec.Code, enc.MapImage)
+	}
+}
+
+func TestEncounterMapImage_UnconfiguredIs503(t *testing.T) {
+	h, _ := newHandler(t, true, 0)
+	router := campaignRoutes(h)
+	rec := do(t, router, http.MethodPost, encPath, `{"name":"E"}`)
+	var enc model.Encounter
+	_ = json.Unmarshal(rec.Body.Bytes(), &enc)
+	if rec := do(t, router, http.MethodPost, encPath+"/"+enc.ID+"/map-image/upload-url", `{"content_type":"image/png"}`); rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("upload-url without maps = %d, want 503", rec.Code)
+	}
+}
+
+func TestMapRegion_ValidateBounds(t *testing.T) {
+	ok := []model.MapRegion{{W: 1, H: 1}, {X: -131072, Y: 131072, W: 131072, H: 131072}}
+	bad := []model.MapRegion{{W: 0, H: 1}, {W: 1, H: 131073}, {X: 131073, W: 1, H: 1}, {Y: -131073, W: 1, H: 1}}
+	for _, m := range ok {
+		if err := m.Validate(); err != nil {
+			t.Errorf("%+v: %v, want ok", m, err)
+		}
+	}
+	for _, m := range bad {
+		if m.Validate() == nil {
+			t.Errorf("%+v: ok, want error", m)
+		}
+	}
+}
+
 func TestEncounterMapImage_Rejects(t *testing.T) {
 	router, fm, path, _ := encMapFixture(t)
-	// A chapter-map key (or another encounter's) can't be claimed by this encounter.
-	chapterKey := "maps/g1/ch1/a.png"
-	fm.objects[chapterKey] = "image/png"
-	if code, _ := putEncounter(t, router, path, `,"map_image":{"key":"`+chapterKey+`","width":1,"height":1}`); code != http.StatusBadRequest {
-		t.Fatalf("foreign key = %d, want 400", code)
+	// A chapter-map key or another encounter's key can't be claimed by this encounter.
+	for _, foreign := range []string{"maps/g1/ch1/a.png", "maps/g1/encounters/other/a.png"} {
+		fm.objects[foreign] = "image/png"
+		if code, _ := putEncounter(t, router, path, `,"map_image":{"key":"`+foreign+`","width":1,"height":1}`); code != http.StatusBadRequest {
+			t.Errorf("foreign key %s = %d, want 400", foreign, code)
+		}
 	}
 	if rec := do(t, router, http.MethodPost, encPath, `{"name":"N","map_image":{"key":"x","width":1,"height":1}}`); rec.Code != http.StatusBadRequest {
 		t.Fatalf("create with image = %d, want 400", rec.Code)
