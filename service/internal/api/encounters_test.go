@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"github.com/lestrrat-go/jwx/v2/jwt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -824,6 +825,30 @@ func TestRetryReleasePush_ReplacesErrorWithReceipt(t *testing.T) {
 	p := getEnc(t, router, enc.ID).ReleasePush
 	if p == nil || p.Error != "" || p.LedgerID != enc.ID || p.ItemCount != 1 {
 		t.Fatalf("stored release_push after retry = %+v, want receipt", p)
+	}
+}
+
+// /me tells the SPA whether party-treasure is configured, so it can hide Release.
+func TestMe_ReportsPartyTreasure(t *testing.T) {
+	tok, err := jwt.NewBuilder().Subject("42").Build()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, configured := range []bool{false, true} {
+		h, _ := newHandler(t, true, 0)
+		if configured {
+			h.cfg.PartyTreasure = &stubReleaser{}
+		}
+		req := httptest.NewRequest(http.MethodGet, "/api/app/me", nil)
+		rec := httptest.NewRecorder()
+		h.me(rec, req.WithContext(auth.WithToken(req.Context(), tok)))
+		var body struct {
+			PartyTreasure *bool `json:"party_treasure"`
+		}
+		_ = json.Unmarshal(rec.Body.Bytes(), &body)
+		if rec.Code != http.StatusOK || body.PartyTreasure == nil || *body.PartyTreasure != configured {
+			t.Fatalf("configured=%v: /me = %d %s, want party_treasure=%v", configured, rec.Code, rec.Body, configured)
+		}
 	}
 }
 

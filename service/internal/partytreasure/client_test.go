@@ -49,12 +49,26 @@ func TestReleasePayload_TreasureAndCoins(t *testing.T) {
 
 // A custom/derived ref's json name is sent; a pristine ref (game_id only) sends "".
 func TestReleasePayload_NameFromRefJSON(t *testing.T) {
-	derived := treasureItem("t1", "", 1, model.TreasureIntact)
-	derived.Treasure.Ref = model.ContentRef{Base: &model.ContentRef{GameID: "Weapons:1"}, JSON: json.RawMessage(`{"name":" Sunblade "}`)}
-	enc := model.Encounter{Content: []model.ContentItem{derived, treasureItem("t2", "Weapons:2", 1, model.TreasureIntact)}}
+	withJSON := func(id, j string) model.ContentItem {
+		c := treasureItem(id, "", 1, model.TreasureIntact)
+		c.Treasure.Ref = model.ContentRef{Base: &model.ContentRef{GameID: "Weapons:1"}, JSON: json.RawMessage(j)}
+		return c
+	}
+	enc := model.Encounter{Content: []model.ContentItem{
+		withJSON("t1", `{"name":" Sunblade "}`),
+		treasureItem("t2", "Weapons:2", 1, model.TreasureIntact), // pristine
+		withJSON("t3", `["not","an","object"]`),
+		withJSON("t4", `{"name":"   "}`),
+	}}
 	items, _ := ReleasePayloadFromEncounter(enc)
-	if len(items) != 2 || items[0].Name != "Sunblade" || items[1].Name != "" {
-		t.Fatalf("names = %+v, want [Sunblade, \"\"]", items)
+	want := []string{"Sunblade", "", "", ""}
+	if len(items) != len(want) {
+		t.Fatalf("items = %+v, want %d", items, len(want))
+	}
+	for i, w := range want {
+		if items[i].Name != w {
+			t.Errorf("item %d name = %q, want %q", i, items[i].Name, w)
+		}
 	}
 }
 
@@ -162,6 +176,15 @@ func TestClient_PushRelease_SignsAndPosts(t *testing.T) {
 	}
 	if sg.payloadHash != wantHash {
 		t.Fatalf("signed payloadHash = %q, want %q", sg.payloadHash, wantHash)
+	}
+}
+
+// A 2xx whose body isn't a releaseResult is an error, not an empty receipt.
+func TestClient_PushRelease_UndecodableReceiptIsError(t *testing.T) {
+	c, _, dr := newTestClient(http.StatusCreated)
+	dr.body = "not json"
+	if _, err := c.PushRelease(context.Background(), "g1", ReleaseInput{ClientULID: "enc1"}); err == nil {
+		t.Fatal("expected an error for an undecodable receipt")
 	}
 }
 

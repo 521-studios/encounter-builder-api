@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -259,21 +260,23 @@ func (h *handler) retryReleasePush(w http.ResponseWriter, r *http.Request) {
 // on enc.ReleasePush. A failure to persist that record is logged, not returned:
 // the response still carries it, and a Retry rewrites it.
 func (h *handler) pushRelease(r *http.Request, enc *model.Encounter) {
+	// A client that hangs up mid-push must not lose the receipt of a push that landed.
+	ctx := context.WithoutCancel(r.Context())
 	items, coins := partytreasure.ReleasePayloadFromEncounter(*enc)
-	rcpt, err := h.cfg.PartyTreasure.PushRelease(r.Context(), enc.CampaignID, partytreasure.ReleaseInput{
+	rcpt, err := h.cfg.PartyTreasure.PushRelease(ctx, enc.CampaignID, partytreasure.ReleaseInput{
 		ClientULID: enc.ID,
 		Items:      items,
 		Coins:      coins,
 	})
 	push := model.ReleasePush{At: time.Now().UTC(), LedgerID: rcpt.LedgerID, ItemCount: rcpt.ItemCount}
 	if err != nil {
-		slog.WarnContext(r.Context(), "party-treasure push failed",
+		slog.WarnContext(ctx, "party-treasure push failed",
 			"encounter", enc.ID, "campaign", enc.CampaignID, "error", err)
 		push.Error = err.Error() // rcpt is zero on error
 	}
 	enc.ReleasePush = &push
-	if err := h.cfg.Store.Put(r.Context(), *enc); err != nil {
-		slog.ErrorContext(r.Context(), "could not save release push result",
+	if err := h.cfg.Store.Put(ctx, *enc); err != nil {
+		slog.ErrorContext(ctx, "could not save release push result",
 			"encounter", enc.ID, "campaign", enc.CampaignID, "error", err)
 	}
 }
