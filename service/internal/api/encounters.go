@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -194,8 +195,8 @@ func (h *handler) deleteEncounter(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// releaseEncounter marks loot as handed to the party. The browser-mediated
-// handshake to party-treasure-api comes later (§5); this records the state.
+// releaseEncounter marks loot as handed to the party and, when party-treasure is
+// configured, pushes it into the party pool.
 func (h *handler) releaseEncounter(w http.ResponseWriter, r *http.Request) {
 	enc, ok := h.loadEncounter(w, r)
 	if !ok {
@@ -226,21 +227,60 @@ func (h *handler) releaseEncounter(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, errBody("could not release encounter"))
 		return
 	}
-	// Release is committed. Best-effort push the loot to party-treasure (§5b):
-	// idempotent by the encounter id, so a re-release won't duplicate. A push
-	// failure is logged and does NOT fail the release — the loot is already released.
+	// Release is committed. Best-effort push the loot to party-treasure (§5b) and
+	// record the outcome on the encounter; a failed push does NOT fail the release —
+	// the GM sees the error and can Retry.
 	if h.cfg.PartyTreasure != nil {
-		items, coins := partytreasure.ReleasePayloadFromEncounter(enc)
-		if err := h.cfg.PartyTreasure.PushRelease(r.Context(), enc.CampaignID, partytreasure.ReleaseInput{
-			ClientULID: enc.ID,
-			Items:      items,
-			Coins:      coins,
-		}); err != nil {
-			slog.WarnContext(r.Context(), "releaseEncounter: party-treasure push failed (release still succeeded)",
-				"encounter", enc.ID, "campaign", enc.CampaignID, "error", err)
-		}
+		h.pushRelease(r, &enc)
 	}
 	writeJSON(w, http.StatusOK, presentEncounter(enc))
+}
+
+// retryReleasePush re-pushes a released encounter's loot after a failed (or
+// unknown) push. Same client_ulid (the encounter id), so party-treasure replays
+// rather than duplicates a push that actually landed.
+func (h *handler) retryReleasePush(w http.ResponseWriter, r *http.Request) {
+	if h.cfg.PartyTreasure == nil {
+		writeJSON(w, http.StatusServiceUnavailable, errBody("party-treasure is not configured"))
+		return
+	}
+	enc, ok := h.loadEncounter(w, r)
+	if !ok {
+		return
+	}
+	if enc.Status != model.StatusReleased {
+		writeJSON(w, http.StatusConflict, errBody("encounter is not released"))
+		return
+	}
+	h.pushRelease(r, &enc)
+	writeJSON(w, http.StatusOK, presentEncounter(enc))
+}
+
+// pushRelease sends enc's loot to party-treasure and stores the receipt or error
+// on enc.ReleasePush. A failure to persist that record is logged, not returned:
+// the response still carries it, and a Retry rewrites it.
+func (h *handler) pushRelease(r *http.Request, enc *model.Encounter) {
+	// A client that hangs up mid-push must not lose the receipt of a push that
+	// landed, so detach from the request, but still bound the push + Put.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 15*time.Second)
+	defer cancel()
+	items, coins := partytreasure.ReleasePayloadFromEncounter(*enc)
+	rcpt, err := h.cfg.PartyTreasure.PushRelease(ctx, enc.CampaignID, partytreasure.ReleaseInput{
+		ClientULID: enc.ID,
+		Items:      items,
+		Coins:      coins,
+	})
+	push := model.ReleasePush{At: time.Now().UTC(), LedgerID: rcpt.LedgerID, ItemCount: rcpt.ItemCount}
+	if err != nil {
+		slog.WarnContext(ctx, "party-treasure push failed",
+			"encounter", enc.ID, "campaign", enc.CampaignID, "error", err)
+		push.Error = err.Error() // rcpt is zero on error
+	}
+	enc.ReleasePush = &push
+	if err := h.cfg.Store.Put(ctx, *enc); err != nil {
+		slog.ErrorContext(ctx, "could not save release push result",
+			"encounter", enc.ID, "campaign", enc.CampaignID, "error", err)
+	}
 }
 
 // loadEncounter fetches the path-addressed encounter, writing 404/500 and

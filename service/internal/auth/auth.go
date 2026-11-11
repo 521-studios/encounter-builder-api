@@ -269,6 +269,12 @@ func RawToken(ctx context.Context) string {
 	return s
 }
 
+// WithToken seeds the verified token the middleware sets, for tests of
+// handlers that read auth.Token.
+func WithToken(ctx context.Context, tok jwt.Token) context.Context {
+	return context.WithValue(ctx, tokenKey, tok)
+}
+
 // WithRawToken seeds the bearer string the middleware sets. Exported so
 // downstream packages (and their tests) can construct an authorized context.
 func WithRawToken(ctx context.Context, raw string) context.Context {

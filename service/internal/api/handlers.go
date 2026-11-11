@@ -30,6 +30,8 @@ func (h *handler) me(w http.ResponseWriter, r *http.Request) {
 		"issuer":    tok.Issuer(),
 		"audience":  tok.Audience(),
 		"expiresAt": tok.Expiration(),
+		// The SPA hides Release and its receipt when party-treasure isn't wired up.
+		"party_treasure": h.cfg.PartyTreasure != nil,
 	})
 }
 

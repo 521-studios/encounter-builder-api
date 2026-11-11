@@ -63,6 +63,7 @@ func NewRouter(cfg Config) *chi.Mux {
 			r.Put("/{encounterID}", h.updateEncounter)
 			r.Delete("/{encounterID}", h.deleteEncounter)
 			r.Post("/{encounterID}/release", h.releaseEncounter)
+			r.Post("/{encounterID}/release/retry", h.retryReleasePush)
 			r.Post("/{encounterID}/map-image/upload-url", h.encounterMapImageUploadURL)
 		})
 

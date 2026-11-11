@@ -47,6 +47,31 @@ func TestReleasePayload_TreasureAndCoins(t *testing.T) {
 	}
 }
 
+// A custom/derived ref's json name is sent; a pristine ref (game_id only) sends "".
+func TestReleasePayload_NameFromRefJSON(t *testing.T) {
+	withJSON := func(id, j string) model.ContentItem {
+		c := treasureItem(id, "", 1, model.TreasureIntact)
+		c.Treasure.Ref = model.ContentRef{Base: &model.ContentRef{GameID: "Weapons:1"}, JSON: json.RawMessage(j)}
+		return c
+	}
+	enc := model.Encounter{Content: []model.ContentItem{
+		withJSON("t1", `{"name":" Sunblade "}`),
+		treasureItem("t2", "Weapons:2", 1, model.TreasureIntact), // pristine
+		withJSON("t3", `["not","an","object"]`),
+		withJSON("t4", `{"name":"   "}`),
+	}}
+	items, _ := ReleasePayloadFromEncounter(enc)
+	want := []string{"Sunblade", "", "", ""}
+	if len(items) != len(want) {
+		t.Fatalf("items = %+v, want %d", items, len(want))
+	}
+	for i, w := range want {
+		if items[i].Name != w {
+			t.Errorf("item %d name = %q, want %q", i, items[i].Name, w)
+		}
+	}
+}
+
 func TestReleasePayload_SkipsBlankAndPrunedTreasure(t *testing.T) {
 	enc := model.Encounter{Content: []model.ContentItem{
 		{ID: "blank", Type: model.ContentTreasure, Treasure: &model.TreasureLine{Qty: 1}}, // no ref
@@ -94,11 +119,12 @@ func (f *fakeSigner) SignHTTP(_ context.Context, _ aws.Credentials, r *http.Requ
 type fakeDoer struct {
 	req    *http.Request
 	status int
+	body   string
 }
 
 func (f *fakeDoer) Do(r *http.Request) (*http.Response, error) {
 	f.req = r
-	return &http.Response{StatusCode: f.status, Body: io.NopCloser(strings.NewReader(""))}, nil
+	return &http.Response{StatusCode: f.status, Body: io.NopCloser(strings.NewReader(f.body))}, nil
 }
 
 type fakeCreds struct{}
@@ -122,9 +148,13 @@ func newTestClient(status int) (*Client, *fakeSigner, *fakeDoer) {
 
 func TestClient_PushRelease_SignsAndPosts(t *testing.T) {
 	c, sg, dr := newTestClient(http.StatusCreated)
-	err := c.PushRelease(context.Background(), "g1", ReleaseInput{ClientULID: "enc1", Coins: model.Currency{GP: 5}})
+	dr.body = `{"items":[{"id":"i1"},{"id":"i2"}],"ledger":{"id":"enc1","kind":"release"}}`
+	rcpt, err := c.PushRelease(context.Background(), "g1", ReleaseInput{ClientULID: "enc1", Coins: model.Currency{GP: 5}})
 	if err != nil {
 		t.Fatalf("PushRelease: %v", err)
+	}
+	if rcpt != (Receipt{LedgerID: "enc1", ItemCount: 2}) {
+		t.Fatalf("receipt = %+v, want ledger enc1 with 2 items", rcpt)
 	}
 	if !sg.called {
 		t.Fatal("signer was not called")
@@ -149,9 +179,18 @@ func TestClient_PushRelease_SignsAndPosts(t *testing.T) {
 	}
 }
 
+// A 2xx whose body isn't a releaseResult is an error, not an empty receipt.
+func TestClient_PushRelease_UndecodableReceiptIsError(t *testing.T) {
+	c, _, dr := newTestClient(http.StatusCreated)
+	dr.body = "not json"
+	if _, err := c.PushRelease(context.Background(), "g1", ReleaseInput{ClientULID: "enc1"}); err == nil {
+		t.Fatal("expected an error for an undecodable receipt")
+	}
+}
+
 func TestClient_PushRelease_Non2xxIsError(t *testing.T) {
 	c, _, _ := newTestClient(http.StatusForbidden)
-	if err := c.PushRelease(context.Background(), "g1", ReleaseInput{ClientULID: "enc1"}); err == nil {
+	if _, err := c.PushRelease(context.Background(), "g1", ReleaseInput{ClientULID: "enc1"}); err == nil {
 		t.Fatal("expected an error on 403")
 	}
 }

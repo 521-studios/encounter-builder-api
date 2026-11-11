@@ -32,7 +32,9 @@ signature, so the SPA forwards the OIDC token in `X-Access-Token` (passed throug
 by the CloudFront origin-request-policy). The JWT is fully verified either way.
 
 Env: `OIDC_ISSUER` (required), `OIDC_AUDIENCE` (the SPA client_id), `ENV`,
-`ENCOUNTERS_TABLE`, `MAPS_BUCKET` (optional; unset makes map uploads 503).
+`ENCOUNTERS_TABLE`, `MAPS_BUCKET` (optional; unset makes map uploads 503),
+`PARTY_TREASURE_URL` (optional; unset disables the release push, retry 503s, and
+`/me` reports `party_treasure: false` so the SPA hides Release).
 
 ## Dev
 ```bash
