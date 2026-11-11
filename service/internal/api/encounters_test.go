@@ -71,6 +71,7 @@ func campaignRoutes(h *handler) http.Handler {
 		r.Put("/{encounterID}", h.updateEncounter)
 		r.Delete("/{encounterID}", h.deleteEncounter)
 		r.Post("/{encounterID}/release", h.releaseEncounter)
+		r.Post("/{encounterID}/release/retry", h.retryReleasePush)
 		r.Post("/{encounterID}/map-image/upload-url", h.encounterMapImageUploadURL)
 	})
 	return r
@@ -701,7 +702,8 @@ func TestRelease_CompleteContentReleasesWithoutForce(t *testing.T) {
 	}
 }
 
-// stubReleaser records the ReleaseInput it was handed; err makes PushRelease fail.
+// stubReleaser records the ReleaseInput it was handed and answers with a receipt
+// for it (ledger id = client_ulid, item count = len(items)); err makes it fail.
 type stubReleaser struct {
 	calls  int
 	gameID string
@@ -709,11 +711,25 @@ type stubReleaser struct {
 	err    error
 }
 
-func (s *stubReleaser) PushRelease(_ context.Context, gameID string, in partytreasure.ReleaseInput) error {
+func (s *stubReleaser) PushRelease(_ context.Context, gameID string, in partytreasure.ReleaseInput) (partytreasure.Receipt, error) {
 	s.calls++
 	s.gameID = gameID
 	s.got = in
-	return s.err
+	if s.err != nil {
+		return partytreasure.Receipt{}, s.err
+	}
+	return partytreasure.Receipt{LedgerID: in.ClientULID, ItemCount: len(in.Items)}, nil
+}
+
+// getEnc reloads an encounter through the API, so assertions see what was stored.
+func getEnc(t *testing.T, router http.Handler, id string) model.Encounter {
+	t.Helper()
+	rec := do(t, router, http.MethodGet, encPath+"/"+id, "")
+	var got model.Encounter
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("get %s: %d %s", id, rec.Code, rec.Body)
+	}
+	return got
 }
 
 const lootContent = `{"name":"Loot","content":[` +
@@ -751,6 +767,11 @@ func TestRelease_PushesLootToPartyTreasure(t *testing.T) {
 	if rel.got.Coins != (model.Currency{GP: 10, SP: 5}) {
 		t.Fatalf("coins not mapped: %+v", rel.got.Coins)
 	}
+	// The receipt is stored on the encounter.
+	p := getEnc(t, router, enc.ID).ReleasePush
+	if p == nil || p.LedgerID != enc.ID || p.ItemCount != 1 || p.Error != "" {
+		t.Fatalf("stored release_push = %+v, want receipt for %s with 1 item", p, enc.ID)
+	}
 }
 
 // A push failure is best-effort: the release still succeeds (status released, 200).
@@ -771,6 +792,60 @@ func TestRelease_PushFailureStillSucceeds(t *testing.T) {
 	_ = json.Unmarshal(rec.Body.Bytes(), &released)
 	if released.Status != model.StatusReleased || released.ReleasedAt == nil {
 		t.Fatalf("release did not commit despite push failure: %+v", released)
+	}
+	// The failure is stored so the GM sees it and can Retry.
+	p := getEnc(t, router, enc.ID).ReleasePush
+	if p == nil || p.Error == "" || p.LedgerID != "" {
+		t.Fatalf("stored release_push = %+v, want an error and no receipt", p)
+	}
+}
+
+// Retry after a failed push re-sends with the SAME client_ulid and replaces the
+// stored error with the receipt.
+func TestRetryReleasePush_ReplacesErrorWithReceipt(t *testing.T) {
+	h, _ := newHandler(t, true, 0)
+	rel := &stubReleaser{err: errBoom}
+	h.cfg.PartyTreasure = rel
+	router := campaignRoutes(h)
+
+	rec := do(t, router, http.MethodPost, encPath, lootContent)
+	var enc model.Encounter
+	_ = json.Unmarshal(rec.Body.Bytes(), &enc)
+	do(t, router, http.MethodPost, encPath+"/"+enc.ID+"/release", "")
+
+	rel.err = nil
+	rec = do(t, router, http.MethodPost, encPath+"/"+enc.ID+"/release/retry", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("retry = %d, want 200; body=%s", rec.Code, rec.Body)
+	}
+	if rel.calls != 2 || rel.got.ClientULID != enc.ID {
+		t.Fatalf("retry pushed calls=%d client_ulid=%q, want 2 calls with %q", rel.calls, rel.got.ClientULID, enc.ID)
+	}
+	p := getEnc(t, router, enc.ID).ReleasePush
+	if p == nil || p.Error != "" || p.LedgerID != enc.ID || p.ItemCount != 1 {
+		t.Fatalf("stored release_push after retry = %+v, want receipt", p)
+	}
+}
+
+// Retry needs a released encounter and a configured party-treasure.
+func TestRetryReleasePush_Guards(t *testing.T) {
+	h, _ := newHandler(t, true, 0)
+	router := campaignRoutes(h)
+	rec := do(t, router, http.MethodPost, encPath, lootContent)
+	var enc model.Encounter
+	_ = json.Unmarshal(rec.Body.Bytes(), &enc)
+	retry := encPath + "/" + enc.ID + "/release/retry"
+
+	if rec := do(t, router, http.MethodPost, retry, ""); rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("retry with party-treasure unset = %d, want 503", rec.Code)
+	}
+	rel := &stubReleaser{}
+	h.cfg.PartyTreasure = rel
+	if rec := do(t, router, http.MethodPost, retry, ""); rec.Code != http.StatusConflict {
+		t.Fatalf("retry of an unreleased encounter = %d, want 409", rec.Code)
+	}
+	if rel.calls != 0 {
+		t.Fatalf("guarded retry pushed %d times, want 0", rel.calls)
 	}
 }
 

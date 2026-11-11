@@ -43,11 +43,18 @@ type ReleaseInput struct {
 	Coins      model.Currency `json:"coins"`
 }
 
+// Receipt is what party-treasure recorded for a release: its ledger entry id
+// (which is the client_ulid) and how many items landed in the pool.
+type Receipt struct {
+	LedgerID  string
+	ItemCount int
+}
+
 // Releaser pushes a released encounter's loot into the party pool. The handler
 // depends on this interface so tests can stub it; it is nil when the push is
 // disabled (no PARTY_TREASURE_URL).
 type Releaser interface {
-	PushRelease(ctx context.Context, gameID string, in ReleaseInput) error
+	PushRelease(ctx context.Context, gameID string, in ReleaseInput) (Receipt, error)
 }
 
 // ReleasePayloadFromEncounter walks an encounter's content and extracts its loot:
@@ -128,23 +135,23 @@ func New(baseURL string, creds aws.CredentialsProvider, region string) *Client {
 }
 
 // PushRelease POSTs the release to {baseURL}/api/party/parties/{gameID}/releases,
-// SigV4-signed as service "lambda". Non-2xx is an error. The required
-// x-amz-content-sha256 header is set by the v4 signer from the payload hash.
-func (c *Client) PushRelease(ctx context.Context, gameID string, in ReleaseInput) error {
+// SigV4-signed as service "lambda". Non-2xx is an error. A replay of the same
+// client_ulid answers 200 with the original release, so a retry is safe.
+func (c *Client) PushRelease(ctx context.Context, gameID string, in ReleaseInput) (Receipt, error) {
 	body, err := json.Marshal(in)
 	if err != nil {
-		return fmt.Errorf("partytreasure: marshal: %w", err)
+		return Receipt{}, fmt.Errorf("partytreasure: marshal: %w", err)
 	}
 	url := fmt.Sprintf("%s/api/party/parties/%s/releases", c.baseURL, gameID)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
-		return err
+		return Receipt{}, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 
 	creds, err := c.creds.Retrieve(ctx)
 	if err != nil {
-		return fmt.Errorf("partytreasure: retrieve creds: %w", err)
+		return Receipt{}, fmt.Errorf("partytreasure: retrieve creds: %w", err)
 	}
 	// A bodied request to an IAM Function URL must carry x-amz-content-sha256 AS A
 	// SIGNED HEADER — the v4 SignHTTP does NOT add it (it only uses the payload hash
@@ -154,17 +161,27 @@ func (c *Client) PushRelease(ctx context.Context, gameID string, in ReleaseInput
 	hash := hex.EncodeToString(sum[:])
 	req.Header.Set("X-Amz-Content-Sha256", hash)
 	if err := c.signer.SignHTTP(ctx, creds, req, hash, "lambda", c.region, time.Now()); err != nil {
-		return fmt.Errorf("partytreasure: sign: %w", err)
+		return Receipt{}, fmt.Errorf("partytreasure: sign: %w", err)
 	}
 
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return fmt.Errorf("partytreasure: do: %w", err)
+		return Receipt{}, fmt.Errorf("partytreasure: do: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		snippet, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-		return fmt.Errorf("partytreasure: release returned %d: %s", resp.StatusCode, strings.TrimSpace(string(snippet)))
+		return Receipt{}, fmt.Errorf("partytreasure: release returned %d: %s", resp.StatusCode, strings.TrimSpace(string(snippet)))
 	}
-	return nil
+	// party-treasure's releaseResult: {items: [...], ledger: {id, ...}}.
+	var out struct {
+		Items  []json.RawMessage `json:"items"`
+		Ledger struct {
+			ID string `json:"id"`
+		} `json:"ledger"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&out); err != nil {
+		return Receipt{}, fmt.Errorf("partytreasure: decode receipt: %w", err)
+	}
+	return Receipt{LedgerID: out.Ledger.ID, ItemCount: len(out.Items)}, nil
 }

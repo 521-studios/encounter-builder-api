@@ -94,11 +94,12 @@ func (f *fakeSigner) SignHTTP(_ context.Context, _ aws.Credentials, r *http.Requ
 type fakeDoer struct {
 	req    *http.Request
 	status int
+	body   string
 }
 
 func (f *fakeDoer) Do(r *http.Request) (*http.Response, error) {
 	f.req = r
-	return &http.Response{StatusCode: f.status, Body: io.NopCloser(strings.NewReader(""))}, nil
+	return &http.Response{StatusCode: f.status, Body: io.NopCloser(strings.NewReader(f.body))}, nil
 }
 
 type fakeCreds struct{}
@@ -122,9 +123,13 @@ func newTestClient(status int) (*Client, *fakeSigner, *fakeDoer) {
 
 func TestClient_PushRelease_SignsAndPosts(t *testing.T) {
 	c, sg, dr := newTestClient(http.StatusCreated)
-	err := c.PushRelease(context.Background(), "g1", ReleaseInput{ClientULID: "enc1", Coins: model.Currency{GP: 5}})
+	dr.body = `{"items":[{"id":"i1"},{"id":"i2"}],"ledger":{"id":"enc1","kind":"release"}}`
+	rcpt, err := c.PushRelease(context.Background(), "g1", ReleaseInput{ClientULID: "enc1", Coins: model.Currency{GP: 5}})
 	if err != nil {
 		t.Fatalf("PushRelease: %v", err)
+	}
+	if rcpt != (Receipt{LedgerID: "enc1", ItemCount: 2}) {
+		t.Fatalf("receipt = %+v, want ledger enc1 with 2 items", rcpt)
 	}
 	if !sg.called {
 		t.Fatal("signer was not called")
@@ -151,7 +156,7 @@ func TestClient_PushRelease_SignsAndPosts(t *testing.T) {
 
 func TestClient_PushRelease_Non2xxIsError(t *testing.T) {
 	c, _, _ := newTestClient(http.StatusForbidden)
-	if err := c.PushRelease(context.Background(), "g1", ReleaseInput{ClientULID: "enc1"}); err == nil {
+	if _, err := c.PushRelease(context.Background(), "g1", ReleaseInput{ClientULID: "enc1"}); err == nil {
 		t.Fatal("expected an error on 403")
 	}
 }

@@ -392,8 +392,21 @@ type Encounter struct {
 	MapRegion  *MapRegion `json:"map_region,omitempty"`
 	MapImage   *MapImage  `json:"map_image,omitempty"`
 	ReleasedAt *time.Time `json:"released_at,omitempty"`
-	CreatedAt  time.Time  `json:"created_at"`
-	UpdatedAt  time.Time  `json:"updated_at"`
+	// ReleasePush is the latest push of the released loot to party-treasure:
+	// a receipt, or the error a GM can Retry past. nil = never pushed (6m14).
+	ReleasePush *ReleasePush `json:"release_push,omitempty"`
+	CreatedAt   time.Time    `json:"created_at"`
+	UpdatedAt   time.Time    `json:"updated_at"`
+}
+
+// ReleasePush records one attempt to push a released encounter's loot into the
+// party pool. On success LedgerID/ItemCount are party-treasure's receipt; on
+// failure Error says why and the receipt fields are empty.
+type ReleasePush struct {
+	At        time.Time `json:"at"`
+	LedgerID  string    `json:"ledger_id,omitempty"`
+	ItemCount int       `json:"item_count"`
+	Error     string    `json:"error,omitempty"`
 }
 
 // Chapter is a subdivision of a campaign that groups encounters (like an
