@@ -712,8 +712,11 @@ type stubReleaser struct {
 	err    error
 }
 
-func (s *stubReleaser) PushRelease(_ context.Context, gameID string, in partytreasure.ReleaseInput) (partytreasure.Receipt, error) {
+func (s *stubReleaser) PushRelease(ctx context.Context, gameID string, in partytreasure.ReleaseInput) (partytreasure.Receipt, error) {
 	s.calls++
+	if err := ctx.Err(); err != nil {
+		return partytreasure.Receipt{}, err // a real push on a dead ctx fails the same way
+	}
 	s.gameID = gameID
 	s.got = in
 	if s.err != nil {
@@ -849,6 +852,39 @@ func TestMe_ReportsPartyTreasure(t *testing.T) {
 		if rec.Code != http.StatusOK || body.PartyTreasure == nil || *body.PartyTreasure != configured {
 			t.Fatalf("configured=%v: /me = %d %s, want party_treasure=%v", configured, rec.Code, rec.Body, configured)
 		}
+	}
+}
+
+// routed builds a request for handlers called directly (no router), carrying the
+// chi URL params for encounter id in campaign g1, on ctx.
+func routed(t *testing.T, ctx context.Context, id string) *http.Request {
+	t.Helper()
+	rc := chi.NewRouteContext()
+	rc.URLParams.Add("campaignID", "g1")
+	rc.URLParams.Add("encounterID", id)
+	req := httptest.NewRequest(http.MethodPost, encPath+"/"+id+"/release/retry", nil)
+	return req.WithContext(context.WithValue(ctx, chi.RouteCtxKey, rc))
+}
+
+// A client that hangs up mid-retry still gets its push and receipt recorded:
+// the push runs detached from the request context.
+func TestRetryReleasePush_SurvivesCancelledRequest(t *testing.T) {
+	h, _ := newHandler(t, true, 0)
+	rel := &stubReleaser{err: errBoom}
+	h.cfg.PartyTreasure = rel
+	router := campaignRoutes(h)
+
+	rec := do(t, router, http.MethodPost, encPath, lootContent)
+	var enc model.Encounter
+	_ = json.Unmarshal(rec.Body.Bytes(), &enc)
+	do(t, router, http.MethodPost, encPath+"/"+enc.ID+"/release", "")
+
+	rel.err = nil
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	h.retryReleasePush(httptest.NewRecorder(), routed(t, ctx, enc.ID))
+	if p := getEnc(t, router, enc.ID).ReleasePush; p == nil || p.Error != "" || p.LedgerID != enc.ID {
+		t.Fatalf("release_push after a cancelled-request retry = %+v, want the receipt", p)
 	}
 }
 

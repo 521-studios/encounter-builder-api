@@ -260,8 +260,10 @@ func (h *handler) retryReleasePush(w http.ResponseWriter, r *http.Request) {
 // on enc.ReleasePush. A failure to persist that record is logged, not returned:
 // the response still carries it, and a Retry rewrites it.
 func (h *handler) pushRelease(r *http.Request, enc *model.Encounter) {
-	// A client that hangs up mid-push must not lose the receipt of a push that landed.
-	ctx := context.WithoutCancel(r.Context())
+	// A client that hangs up mid-push must not lose the receipt of a push that
+	// landed, so detach from the request, but still bound the push + Put.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 15*time.Second)
+	defer cancel()
 	items, coins := partytreasure.ReleasePayloadFromEncounter(*enc)
 	rcpt, err := h.cfg.PartyTreasure.PushRelease(ctx, enc.CampaignID, partytreasure.ReleaseInput{
 		ClientULID: enc.ID,
