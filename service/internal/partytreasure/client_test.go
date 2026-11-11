@@ -47,6 +47,17 @@ func TestReleasePayload_TreasureAndCoins(t *testing.T) {
 	}
 }
 
+// A custom/derived ref's json name is sent; a pristine ref (game_id only) sends "".
+func TestReleasePayload_NameFromRefJSON(t *testing.T) {
+	derived := treasureItem("t1", "", 1, model.TreasureIntact)
+	derived.Treasure.Ref = model.ContentRef{Base: &model.ContentRef{GameID: "Weapons:1"}, JSON: json.RawMessage(`{"name":" Sunblade "}`)}
+	enc := model.Encounter{Content: []model.ContentItem{derived, treasureItem("t2", "Weapons:2", 1, model.TreasureIntact)}}
+	items, _ := ReleasePayloadFromEncounter(enc)
+	if len(items) != 2 || items[0].Name != "Sunblade" || items[1].Name != "" {
+		t.Fatalf("names = %+v, want [Sunblade, \"\"]", items)
+	}
+}
+
 func TestReleasePayload_SkipsBlankAndPrunedTreasure(t *testing.T) {
 	enc := model.Encounter{Content: []model.ContentItem{
 		{ID: "blank", Type: model.ContentTreasure, Treasure: &model.TreasureLine{Qty: 1}}, // no ref

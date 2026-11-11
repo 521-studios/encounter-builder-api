@@ -80,7 +80,7 @@ func ReleasePayloadFromEncounter(enc model.Encounter) (items []ItemInput, coins 
 			}
 			items = append(items, ItemInput{
 				Ref:        t.Ref,
-				Name:       "", // the API stores refs opaquely; party-treasure resolves the display name
+				Name:       refName(t.Ref), // "" for pristine refs; party-treasure-web falls back to the pfsrd2 name
 				Qty:        t.Qty,
 				Masked:     t.Masked,
 				MaskLabel:  t.MaskLabel,
@@ -98,6 +98,16 @@ func ReleasePayloadFromEncounter(enc model.Encounter) (items []ItemInput, coins 
 		}
 	}
 	return items, coins
+}
+
+// refName is the item name a custom or derived ref carries in its json snapshot
+// (ref.json.name). Pristine refs have only a game_id, so it's "" for them.
+func refName(r model.ContentRef) string {
+	var j struct {
+		Name string `json:"name"`
+	}
+	_ = json.Unmarshal(r.JSON, &j) // absent or non-object json → ""
+	return strings.TrimSpace(j.Name)
 }
 
 // httpDoer is the subset of *http.Client the client needs (stubbed in tests).
