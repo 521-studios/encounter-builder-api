@@ -20,6 +20,7 @@ func treasureItem(id, gameID string, qty int, state model.TreasureState) model.C
 	return model.ContentItem{ID: id, Type: model.ContentTreasure, Treasure: &model.TreasureLine{
 		Ref: model.ContentRef{GameID: gameID}, Qty: qty, State: state,
 		Masked: true, MaskLabel: "glowing rod", IdentifyDC: 20, SaleClass: model.SalePureTreasure,
+		Variant: "Striking (Greater)",
 	}}
 }
 
@@ -39,7 +40,8 @@ func TestReleasePayload_TreasureAndCoins(t *testing.T) {
 	}
 	it := items[0]
 	if it.Ref.GameID != "Weapons:1" || it.Qty != 2 || !it.Masked ||
-		it.MaskLabel != "glowing rod" || it.IdentifyDC != 20 || it.SaleClass != model.SalePureTreasure {
+		it.MaskLabel != "glowing rod" || it.IdentifyDC != 20 || it.SaleClass != model.SalePureTreasure ||
+		it.Variant != "Striking (Greater)" {
 		t.Fatalf("treasure not mapped: %+v", it)
 	}
 	if coins != (model.Currency{CP: 0, SP: 5, GP: 20, PP: 1}) {
@@ -192,5 +194,17 @@ func TestClient_PushRelease_Non2xxIsError(t *testing.T) {
 	c, _, _ := newTestClient(http.StatusForbidden)
 	if _, err := c.PushRelease(context.Background(), "g1", ReleaseInput{ClientULID: "enc1"}); err == nil {
 		t.Fatal("expected an error on 403")
+	}
+}
+
+// variant rides as a sibling of ref on the wire; the base item omits it.
+func TestItemInput_VariantWire(t *testing.T) {
+	b, _ := json.Marshal(ItemInput{Ref: model.ContentRef{GameID: "g"}, Variant: "Striking (Greater)", Qty: 1})
+	if !strings.Contains(string(b), `"variant":"Striking (Greater)"`) {
+		t.Fatalf("variant missing: %s", b)
+	}
+	b, _ = json.Marshal(ItemInput{Ref: model.ContentRef{GameID: "g"}, Qty: 1})
+	if strings.Contains(string(b), "variant") {
+		t.Fatalf("base item must omit variant: %s", b)
 	}
 }

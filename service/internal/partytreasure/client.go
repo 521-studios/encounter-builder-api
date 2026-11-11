@@ -27,6 +27,7 @@ import (
 // two services.
 type ItemInput struct {
 	Ref        model.ContentRef `json:"ref"`
+	Variant    string           `json:"variant,omitempty"` // stat_block.variants name; "" = base item
 	Name       string           `json:"name"`
 	Qty        int              `json:"qty"`
 	Masked     bool             `json:"masked"`
@@ -80,6 +81,7 @@ func ReleasePayloadFromEncounter(enc model.Encounter) (items []ItemInput, coins 
 			}
 			items = append(items, ItemInput{
 				Ref:        t.Ref,
+				Variant:    t.Variant,
 				Name:       refName(t.Ref), // "" for pristine refs; party-treasure-web falls back to the pfsrd2 name
 				Qty:        t.Qty,
 				Masked:     t.Masked,
