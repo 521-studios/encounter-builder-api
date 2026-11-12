@@ -10,6 +10,7 @@ import (
 	"github.com/521studios/encounter-builder-api/internal/auth"
 	"github.com/521studios/encounter-builder-api/internal/letsroll"
 	"github.com/521studios/encounter-builder-api/internal/store"
+	"github.com/go-chi/chi/v5"
 )
 
 // testDeps builds the non-Auth Config fields the router requires. The campaign
@@ -39,17 +40,20 @@ func TestRouter_ProtectedRoutesRequireToken(t *testing.T) {
 	r := NewRouter(Config{Auth: v, Env: "test", Store: st, LetsRoll: lr})
 
 	cases := map[string]struct {
-		path string
-		want int
+		method, path string
+		want         int
 	}{
-		"health is public":    {"/api/app/healthz", http.StatusOK},
-		"me requires a token": {"/api/app/me", http.StatusUnauthorized},
+		"health is public":    {http.MethodGet, "/api/app/healthz", http.StatusOK},
+		"me requires a token": {http.MethodGet, "/api/app/me", http.StatusUnauthorized},
+		// The map-image upload-url routes (uo69) must sit inside the auth group.
+		"chapter map upload requires a token":   {http.MethodPost, "/api/app/campaigns/c1/chapters/ch1/map-image/upload-url", http.StatusUnauthorized},
+		"encounter map upload requires a token": {http.MethodPost, "/api/app/campaigns/c1/encounters/e1/map-image/upload-url", http.StatusUnauthorized},
 	}
 	for name, tc := range cases {
 		rec := httptest.NewRecorder()
-		r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, tc.path, nil))
+		r.ServeHTTP(rec, httptest.NewRequest(tc.method, tc.path, nil))
 		if rec.Code != tc.want {
-			t.Errorf("%s: GET %s = %d, want %d", name, tc.path, rec.Code, tc.want)
+			t.Errorf("%s: %s %s = %d, want %d", name, tc.method, tc.path, rec.Code, tc.want)
 		}
 	}
 }
@@ -89,5 +93,35 @@ func TestNewRouter_PanicsWithoutStoreOrLetsRoll(t *testing.T) {
 			}()
 			NewRouter(cfg)
 		}()
+	}
+}
+
+// TestNewRouter_MountsMapImageUploadRoutes: the handler tests build their own
+// route tables, and on staging auth 401s before routing, so only a walk of the real
+// router proves both map-image upload-url routes are registered (uo69).
+func TestNewRouter_MountsMapImageUploadRoutes(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	v, err := auth.NewVerifier(ctx, auth.Config{Issuer: "https://issuer.test", JWKSURL: "http://127.0.0.1:1/jwks"})
+	if err != nil {
+		t.Fatalf("NewVerifier: %v", err)
+	}
+	st, lr := testDeps()
+	got := map[string]bool{}
+	err = chi.Walk(NewRouter(Config{Auth: v, Env: "test", Store: st, LetsRoll: lr}),
+		func(method, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {
+			got[method+" "+route] = true
+			return nil
+		})
+	if err != nil {
+		t.Fatalf("chi.Walk: %v", err)
+	}
+	for _, want := range []string{
+		"POST /api/app/campaigns/{campaignID}/chapters/{chapterID}/map-image/upload-url",     // muz0.1
+		"POST /api/app/campaigns/{campaignID}/encounters/{encounterID}/map-image/upload-url", // muz0.7
+	} {
+		if !got[want] {
+			t.Errorf("route not registered: %s", want)
+		}
 	}
 }
