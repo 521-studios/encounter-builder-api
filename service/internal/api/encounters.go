@@ -68,12 +68,13 @@ func (h *handler) createEncounter(w http.ResponseWriter, r *http.Request) {
 		ID:              newID(),
 		CampaignID:      chi.URLParam(r, "campaignID"),
 		Name:            in.Name,
-		Status:          model.StatusDraft, // new encounters always start in draft
+		Status:          model.StatusPrepared, // new encounters always start prepared
 		ChapterID:       in.ChapterID,
 		Description:     in.Description,
 		TextBlocks:      in.TextBlocks,
 		ChallengeBlocks: in.ChallengeBlocks,
 		Notes:           in.Notes,
+		CloseoutNotes:   in.CloseoutNotes,
 		Monsters:        in.Monsters,
 		Hazards:         in.Hazards,
 		Afflictions:     in.Afflictions,
@@ -142,10 +143,12 @@ func (h *handler) updateEncounter(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, errBody(err.Error()))
 		return
 	}
-	// Status transitions are limited: update may move draft<->run, never to
-	// released (that's the /release endpoint). Empty means "leave as-is".
-	if in.Status != "" && in.Status != model.StatusDraft && in.Status != model.StatusRun {
-		writeJSON(w, http.StatusBadRequest, errBody("status must be draft or run"))
+	// Update may move freely among prepared/executing/complete (latest change
+	// wins), never to released (that's the /release endpoint). Empty = as-is.
+	switch in.Status.Canonical() {
+	case "", model.StatusPrepared, model.StatusExecuting, model.StatusComplete:
+	default:
+		writeJSON(w, http.StatusBadRequest, errBody("status must be prepared, executing or complete"))
 		return
 	}
 	existing.Name = in.Name
@@ -154,6 +157,7 @@ func (h *handler) updateEncounter(w http.ResponseWriter, r *http.Request) {
 	existing.TextBlocks = in.TextBlocks
 	existing.ChallengeBlocks = in.ChallengeBlocks
 	existing.Notes = in.Notes
+	existing.CloseoutNotes = in.CloseoutNotes
 	existing.Monsters = in.Monsters
 	existing.Hazards = in.Hazards
 	existing.Afflictions = in.Afflictions
@@ -169,8 +173,15 @@ func (h *handler) updateEncounter(w http.ResponseWriter, r *http.Request) {
 	existing.Currency = in.Currency
 	existing.PartyLevel = in.PartyLevel
 	existing.PartySize = in.PartySize
+	now := time.Now().UTC()
 	if in.Status != "" {
-		existing.Status = in.Status
+		was := existing.Status.Canonical()
+		existing.Status = in.Status.Canonical()
+		if existing.Status != model.StatusComplete {
+			existing.CompletedAt = nil
+		} else if was != model.StatusComplete {
+			existing.CompletedAt = &now
+		}
 	}
 	if in.MapRegion.Set {
 		existing.MapRegion = in.MapRegion.Value
@@ -178,7 +189,7 @@ func (h *handler) updateEncounter(w http.ResponseWriter, r *http.Request) {
 	if !h.applyMapImage(w, r, &existing.MapImage, encounterMapKeyPrefix(existing.CampaignID, existing.ID), in.MapImage) {
 		return
 	}
-	existing.UpdatedAt = time.Now().UTC()
+	existing.UpdatedAt = now
 
 	if err := h.cfg.Store.Put(r.Context(), existing); err != nil {
 		writeJSON(w, http.StatusInternalServerError, errBody("could not save encounter"))

@@ -257,15 +257,35 @@ type Currency struct {
 	PP int `json:"pp"`
 }
 
-// Status is the encounter lifecycle: draft (being built) → run (used at the
-// table) → released (loot handed to the party-treasure app).
+// Status is the encounter lifecycle (we5k.2.1): prepared (built, not yet
+// played) → executing (combat/play under way) → complete (closed out, optionally
+// with notes) → released (loot handed to the party-treasure app; locks edits).
+// Non-combat encounters go prepared → complete directly. The GM may move freely
+// among the first three (latest change wins); released is only via /release.
 type Status string
 
 const (
-	StatusDraft    Status = "draft"
-	StatusRun      Status = "run"
-	StatusReleased Status = "released"
+	StatusPrepared  Status = "prepared"
+	StatusExecuting Status = "executing"
+	StatusComplete  Status = "complete"
+	StatusReleased  Status = "released"
+
+	// Pre-we5k.2.1 values, still in stored rows and older clients' saves.
+	statusLegacyDraft Status = "draft"
+	statusLegacyRun   Status = "run"
 )
+
+// Canonical maps the legacy values onto the current lifecycle (draft → prepared,
+// run → executing); everything else is returned unchanged.
+func (s Status) Canonical() Status {
+	switch s {
+	case statusLegacyDraft:
+		return StatusPrepared
+	case statusLegacyRun:
+		return StatusExecuting
+	}
+	return s
+}
 
 // Encounter is the aggregate stored per (campaign, encounter). CampaignID is
 // the lets-roll game_id; monsters/items are contentRefs, never copied content.
@@ -389,9 +409,13 @@ type Encounter struct {
 	PartySize  *int `json:"party_size,omitempty"`
 	// MapRegion is the encounter's box on the chapter map; MapImage optionally
 	// overrides that crop with its own uploaded image (muz0.7).
-	MapRegion  *MapRegion `json:"map_region,omitempty"`
-	MapImage   *MapImage  `json:"map_image,omitempty"`
-	ReleasedAt *time.Time `json:"released_at,omitempty"`
+	MapRegion *MapRegion `json:"map_region,omitempty"`
+	MapImage  *MapImage  `json:"map_image,omitempty"`
+	// CloseoutNotes are the GM's optional notes from closing the encounter out
+	// (we5k.2.1); CompletedAt is when it last entered complete, nil when not complete.
+	CloseoutNotes string     `json:"closeout_notes,omitempty"`
+	CompletedAt   *time.Time `json:"completed_at,omitempty"`
+	ReleasedAt    *time.Time `json:"released_at,omitempty"`
 	// ReleasePush is the latest push of the released loot to party-treasure:
 	// a receipt, or the error a GM can Retry past. nil = never pushed (6m14).
 	ReleasePush *ReleasePush `json:"release_push,omitempty"`
@@ -809,10 +833,12 @@ type EncounterInput struct {
 	Currency        Currency        `json:"currency"`
 	// PartyLevel/PartySize override the inherited expected-party values; nil
 	// leaves the encounter inheriting from its chapter/campaign.
-	PartyLevel *int `json:"party_level,omitempty"`
-	PartySize  *int `json:"party_size,omitempty"`
-	// Status is honored only by update, and only for draft<->run (release has
-	// its own endpoint). Empty means "leave unchanged".
+	PartyLevel    *int   `json:"party_level,omitempty"`
+	PartySize     *int   `json:"party_size,omitempty"`
+	CloseoutNotes string `json:"closeout_notes,omitempty"`
+	// Status is honored only by update, and only among prepared/executing/complete
+	// (legacy draft/run accepted; release has its own endpoint). Empty means
+	// "leave unchanged".
 	Status Status `json:"status,omitempty"`
 	// Unlike the fields above, these are omit-keeps (null clears), so a save that
 	// doesn't know about the map can't wipe it.
