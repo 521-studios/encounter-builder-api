@@ -40,17 +40,20 @@ func TestRouter_ProtectedRoutesRequireToken(t *testing.T) {
 	r := NewRouter(Config{Auth: v, Env: "test", Store: st, LetsRoll: lr})
 
 	cases := map[string]struct {
-		path string
-		want int
+		method, path string
+		want         int
 	}{
-		"health is public":    {"/api/app/healthz", http.StatusOK},
-		"me requires a token": {"/api/app/me", http.StatusUnauthorized},
+		"health is public":    {http.MethodGet, "/api/app/healthz", http.StatusOK},
+		"me requires a token": {http.MethodGet, "/api/app/me", http.StatusUnauthorized},
+		// The map-image upload-url routes (uo69) must sit inside the auth group.
+		"chapter map upload requires a token":   {http.MethodPost, "/api/app/campaigns/c1/chapters/ch1/map-image/upload-url", http.StatusUnauthorized},
+		"encounter map upload requires a token": {http.MethodPost, "/api/app/campaigns/c1/encounters/e1/map-image/upload-url", http.StatusUnauthorized},
 	}
 	for name, tc := range cases {
 		rec := httptest.NewRecorder()
-		r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, tc.path, nil))
+		r.ServeHTTP(rec, httptest.NewRequest(tc.method, tc.path, nil))
 		if rec.Code != tc.want {
-			t.Errorf("%s: GET %s = %d, want %d", name, tc.path, rec.Code, tc.want)
+			t.Errorf("%s: %s %s = %d, want %d", name, tc.method, tc.path, rec.Code, tc.want)
 		}
 	}
 }
