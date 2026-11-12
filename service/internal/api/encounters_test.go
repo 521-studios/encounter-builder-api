@@ -1298,8 +1298,8 @@ func TestUpdate_LifecycleAndCloseout(t *testing.T) {
 	if again.CompletedAt == nil || !again.CompletedAt.Equal(*done.CompletedAt) || again.CloseoutNotes != "edited" {
 		t.Fatalf("re-save complete: %+v", again)
 	}
-	// Omitted status leaves it complete.
-	if kept := put(`{"name":"Hall","closeout_notes":"edited"}`); kept.Status != model.StatusComplete || kept.CompletedAt == nil {
+	// Omitted status leaves it complete; omitted closeout_notes (an older client) keeps them.
+	if kept := put(`{"name":"Hall"}`); kept.Status != model.StatusComplete || kept.CompletedAt == nil || kept.CloseoutNotes != "edited" {
 		t.Fatalf("status omitted: %+v", kept)
 	}
 	// Reopen to executing clears completed_at (latest change wins; not forward-only).
@@ -1308,6 +1308,10 @@ func TestUpdate_LifecycleAndCloseout(t *testing.T) {
 	}
 	if rec := do(t, router, http.MethodPut, base, `{"name":"Hall","status":"bogus"}`); rec.Code != http.StatusBadRequest {
 		t.Fatalf("bogus status = %d, want 400", rec.Code)
+	}
+	// An explicit empty string clears the notes.
+	if cleared := put(`{"name":"Hall","closeout_notes":""}`); cleared.CloseoutNotes != "" {
+		t.Fatalf("clear notes: %+v", cleared)
 	}
 }
 

@@ -833,9 +833,11 @@ type EncounterInput struct {
 	Currency        Currency        `json:"currency"`
 	// PartyLevel/PartySize override the inherited expected-party values; nil
 	// leaves the encounter inheriting from its chapter/campaign.
-	PartyLevel    *int   `json:"party_level,omitempty"`
-	PartySize     *int   `json:"party_size,omitempty"`
-	CloseoutNotes string `json:"closeout_notes,omitempty"`
+	PartyLevel *int `json:"party_level,omitempty"`
+	PartySize  *int `json:"party_size,omitempty"`
+	// CloseoutNotes is omit-keeps (nil leaves it): a client that predates it
+	// (an old cached SPA tab) must not wipe the GM's close-out notes on autosave.
+	CloseoutNotes *string `json:"closeout_notes,omitempty"`
 	// Status is honored only by update, and only among prepared/executing/complete
 	// (legacy draft/run accepted; release has its own endpoint). Empty means
 	// "leave unchanged".

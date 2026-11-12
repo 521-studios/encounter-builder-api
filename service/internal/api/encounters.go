@@ -74,7 +74,6 @@ func (h *handler) createEncounter(w http.ResponseWriter, r *http.Request) {
 		TextBlocks:      in.TextBlocks,
 		ChallengeBlocks: in.ChallengeBlocks,
 		Notes:           in.Notes,
-		CloseoutNotes:   in.CloseoutNotes,
 		Monsters:        in.Monsters,
 		Hazards:         in.Hazards,
 		Afflictions:     in.Afflictions,
@@ -157,7 +156,9 @@ func (h *handler) updateEncounter(w http.ResponseWriter, r *http.Request) {
 	existing.TextBlocks = in.TextBlocks
 	existing.ChallengeBlocks = in.ChallengeBlocks
 	existing.Notes = in.Notes
-	existing.CloseoutNotes = in.CloseoutNotes
+	if in.CloseoutNotes != nil {
+		existing.CloseoutNotes = *in.CloseoutNotes
+	}
 	existing.Monsters = in.Monsters
 	existing.Hazards = in.Hazards
 	existing.Afflictions = in.Afflictions
