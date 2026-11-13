@@ -12,6 +12,7 @@ import (
 	"github.com/521studios/encounter-builder-api/internal/auth"
 	"github.com/521studios/encounter-builder-api/internal/combatpush"
 	"github.com/521studios/encounter-builder-api/internal/letsroll"
+	"github.com/521studios/encounter-builder-api/internal/lrident"
 	"github.com/521studios/encounter-builder-api/internal/partytreasure"
 	"github.com/521studios/encounter-builder-api/internal/store"
 	"github.com/go-chi/chi/v5"
@@ -33,6 +34,9 @@ type Config struct {
 	// (we5k.2.3). Nil (LETS_ROLL_COMBAT_PUSH unset) makes the route 503 and /me
 	// report combat_push: false so the SPA hides the button.
 	CombatPush CombatPusher
+	// LetsRollIdentity, when non-nil, admits lets-roll's server-to-server calls
+	// (kill reports, we5k.2.4). Nil (LETS_ROLL_TASK_ROLE_ARN unset) makes them 503.
+	LetsRollIdentity *lrident.Verifier
 }
 
 // CombatPusher is the lets-roll combat push (internal/combatpush.Client).
@@ -59,6 +63,22 @@ func NewRouter(cfg Config) *chi.Mux {
 	// Public: liveness/readiness, no auth (also CloudFront/ALB health if wired).
 	r.Get("/api/app/healthz", h.health)
 
+	// lets-roll's server-to-server calls (we5k.2.4): its service identity, never
+	// a user token, and only on these routes. Dark (503) until
+	// LETS_ROLL_TASK_ROLE_ARN is set.
+	r.Group(func(r chi.Router) {
+		if cfg.LetsRollIdentity != nil {
+			r.Use(cfg.LetsRollIdentity.Middleware)
+		} else {
+			r.Use(func(http.Handler) http.Handler {
+				return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+					writeJSON(w, http.StatusServiceUnavailable, errBody("lets-roll kill reports are not configured"))
+				})
+			})
+		}
+		r.Post("/api/app/campaigns/{campaignID}/encounters/{encounterID}/kill-reports", h.killReports)
+	})
+
 	// Everything below requires a valid lets-roll OIDC bearer token.
 	r.Group(func(r chi.Router) {
 		r.Use(cfg.Auth.Middleware)
@@ -76,6 +96,7 @@ func NewRouter(cfg Config) *chi.Mux {
 			r.Post("/{encounterID}/release", h.releaseEncounter)
 			r.Post("/{encounterID}/release/retry", h.retryReleasePush)
 			r.Post("/{encounterID}/push-combat", h.pushCombat)
+			r.Post("/{encounterID}/kills", h.markKill)
 			r.Post("/{encounterID}/map-image/upload-url", h.encounterMapImageUploadURL)
 		})
 

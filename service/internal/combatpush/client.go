@@ -41,6 +41,10 @@ type Monster struct {
 	Key      string           `json:"eb_monster_key"`
 	Ref      model.ContentRef `json:"content_ref"`
 	Nickname string           `json:"nickname,omitempty"`
+	// Killed: EB has this creature killed (we5k.2.4). lets-roll sets its health
+	// to 0 and never deletes it on a re-push. Absent means no instruction, not
+	// alive: un-killing in EB never revives a monster in lets-roll.
+	Killed bool `json:"killed,omitempty"`
 }
 
 // Input is the push body (lets-roll-dur's ImportFromEb payload).
@@ -83,9 +87,10 @@ func MonstersFrom(enc model.Encounter) (out []Monster, legacy []string) {
 		}
 		for i := 1; i <= n; i++ {
 			out = append(out, Monster{
-				Key:      fmt.Sprintf("%s:%d", c.ID, i),
+				Key:      model.MonsterKey(c.ID, i),
 				Ref:      c.Monster.Ref,
 				Nickname: c.Monster.Nickname,
+				Killed:   enc.Kills[model.MonsterKey(c.ID, i)].Killed,
 			})
 		}
 	}

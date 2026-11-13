@@ -48,6 +48,11 @@ func TestRouter_ProtectedRoutesRequireToken(t *testing.T) {
 		// The map-image upload-url routes (uo69) must sit inside the auth group.
 		"chapter map upload requires a token":   {http.MethodPost, "/api/app/campaigns/c1/chapters/ch1/map-image/upload-url", http.StatusUnauthorized},
 		"encounter map upload requires a token": {http.MethodPost, "/api/app/campaigns/c1/encounters/e1/map-image/upload-url", http.StatusUnauthorized},
+		// we5k.2.4: lets-roll's inbound route takes no user token; it's dark until
+		// LETS_ROLL_TASK_ROLE_ARN is set, and the GM kill route still needs one.
+		"kill reports are dark":     {http.MethodPost, "/api/app/campaigns/c1/encounters/e1/kill-reports", http.StatusServiceUnavailable},
+		"GM kills require a token":  {http.MethodPost, "/api/app/campaigns/c1/encounters/e1/kills", http.StatusUnauthorized},
+		"encounter still protected": {http.MethodGet, "/api/app/campaigns/c1/encounters/e1", http.StatusUnauthorized},
 	}
 	for name, tc := range cases {
 		rec := httptest.NewRecorder()
