@@ -130,3 +130,31 @@ func TestNewRouter_MountsMapImageUploadRoutes(t *testing.T) {
 		}
 	}
 }
+
+// we5k.2.6: a kill report carrying X-Service-Token is judged only as a service
+// token (a bad one is a 401, never a fall-through to lrident); one without it
+// keeps today's path (503 while lrident is unset).
+func TestRouter_KillReportsDispatchOnServiceToken(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	v, err := auth.NewVerifier(ctx, auth.Config{Issuer: "https://issuer.test", JWKSURL: "http://127.0.0.1:1/jwks"})
+	if err != nil {
+		t.Fatalf("NewVerifier: %v", err)
+	}
+	st, lr := testDeps()
+	r := NewRouter(Config{Auth: v, Env: "test", Store: st, LetsRoll: lr, Service: v, ServiceAudience: "encounter-builder-test-svc"})
+	const path = "/api/app/campaigns/c1/encounters/e1/kill-reports"
+
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, path, nil))
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("no service token: %d, want 503", rec.Code)
+	}
+	req := httptest.NewRequest(http.MethodPost, path, nil)
+	req.Header.Set(auth.ServiceTokenHeader, "not-a-jwt")
+	rec = httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("bad service token: %d, want 401", rec.Code)
+	}
+}

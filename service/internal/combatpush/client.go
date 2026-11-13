@@ -118,7 +118,7 @@ type Client struct {
 	now      func() time.Time
 }
 
-// New builds a Client. baseURL is lets-roll (the OIDC issuer host).
+// New builds a Client. baseURL is lets-roll (LETS_ROLL_URL).
 func New(baseURL, env string, creds aws.CredentialsProvider, region string) *Client {
 	return &Client{
 		baseURL:  strings.TrimRight(baseURL, "/"),

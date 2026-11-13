@@ -40,6 +40,7 @@ jobs:
     env:
       TF_STATE_BUCKET: 521studios-infra-tfstate-242288027927
       OIDC_ISSUER: https://lets-roll.staging.521studios.com
+      LETS_ROLL_URL: https://lets-roll.staging.521studios.com
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-go@v5
@@ -71,7 +72,7 @@ jobs:
         run: |
           set -o pipefail
           tofu plan -input=false -no-color -out=tfplan \
-            -var="env=staging" -var="oidc_issuer=${OIDC_ISSUER}" \
+            -var="env=staging" -var="oidc_issuer=${OIDC_ISSUER}" -var="lets_roll_url=${LETS_ROLL_URL}" \
             -var="tf_state_bucket=${TF_STATE_BUCKET}"
       - name: Guard against unreviewed destroys
         working-directory: terraform
@@ -111,6 +112,7 @@ jobs:
     env:
       TF_STATE_BUCKET: 521studios-infra-tfstate-242258465702
       OIDC_ISSUER: https://lets-roll.521studios.com
+      LETS_ROLL_URL: https://lets-roll.521studios.com
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-go@v5
@@ -142,7 +144,7 @@ jobs:
         run: |
           set -o pipefail
           tofu plan -input=false -no-color -out=tfplan \
-            -var="env=production" -var="oidc_issuer=${OIDC_ISSUER}" \
+            -var="env=production" -var="oidc_issuer=${OIDC_ISSUER}" -var="lets_roll_url=${LETS_ROLL_URL}" \
             -var="tf_state_bucket=${TF_STATE_BUCKET}"
       - name: Guard against unreviewed destroys
         working-directory: terraform

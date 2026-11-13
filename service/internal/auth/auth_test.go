@@ -432,3 +432,87 @@ func TestLiveProvider_JWKSLoads(t *testing.T) {
 		t.Fatalf("live provider %s: %v", issuer, err)
 	}
 }
+
+// we5k.2.6: service tokens (client credentials) from X-Service-Token only, with
+// the service aud, the route's scope, and a <=5 min lifetime.
+func TestServiceMiddleware(t *testing.T) {
+	tp := newTestProvider(t)
+	defer tp.close()
+	v := tp.verifier(t) // GM audience is tp.audience; the service one is passed per route
+	const svcAud, scope = "encounter-builder-test-svc", "eb:kill-report"
+	h := v.ServiceMiddleware(svcAud, scope)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if Token(r.Context()).Subject() != "lets-roll-test" {
+			t.Errorf("subject = %q", Token(r.Context()).Subject())
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	svc := func(b *jwt.Builder) *jwt.Builder {
+		return b.Subject("lets-roll-test").Audience([]string{svcAud}).Expiration(time.Now().Add(5*time.Minute)).
+			Claim("scope", "eb:pull eb:kill-report")
+	}
+	cases := []struct {
+		name   string
+		header string
+		token  string
+		want   int
+	}{
+		{"valid", ServiceTokenHeader, tp.mint(t, svc), http.StatusNoContent},
+		{"missing", "", "", http.StatusUnauthorized},
+		{"service token in X-Access-Token", "X-Access-Token", tp.mint(t, svc), http.StatusUnauthorized},
+		{"user (GM) audience", ServiceTokenHeader, tp.mint(t, func(b *jwt.Builder) *jwt.Builder {
+			return svc(b).Audience([]string{tp.audience})
+		}), http.StatusUnauthorized},
+		{"other scope only", ServiceTokenHeader, tp.mint(t, func(b *jwt.Builder) *jwt.Builder {
+			return svc(b).Claim("scope", "eb:pull")
+		}), http.StatusUnauthorized},
+		{"scope prefix is not the scope", ServiceTokenHeader, tp.mint(t, func(b *jwt.Builder) *jwt.Builder {
+			return svc(b).Claim("scope", "eb:kill-reports")
+		}), http.StatusUnauthorized},
+		{"lives too long", ServiceTokenHeader, tp.mint(t, func(b *jwt.Builder) *jwt.Builder {
+			return svc(b).Expiration(time.Now().Add(10 * time.Minute))
+		}), http.StatusUnauthorized},
+		{"no exp", ServiceTokenHeader, tp.mintNoExp(t, svcAud), http.StatusUnauthorized},
+		{"expired", ServiceTokenHeader, tp.mint(t, func(b *jwt.Builder) *jwt.Builder {
+			return svc(b).Expiration(time.Now().Add(-time.Minute))
+		}), http.StatusUnauthorized},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "/", nil)
+			if c.header != "" {
+				req.Header.Set(c.header, c.token)
+			}
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, req)
+			if rec.Code != c.want {
+				t.Fatalf("status = %d, want %d (%s)", rec.Code, c.want, rec.Body)
+			}
+		})
+	}
+
+	// And the GM middleware never admits a service token, even in its own headers.
+	gm := v.Middleware(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }))
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set("X-Access-Token", tp.mint(t, svc))
+	rec := httptest.NewRecorder()
+	gm.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("GM middleware admitted a service token: %d", rec.Code)
+	}
+}
+
+// mintNoExp signs a service-shaped token with no exp claim at all (jwx would
+// otherwise accept it as never expiring).
+func (tp *testProvider) mintNoExp(t *testing.T, aud string) string {
+	t.Helper()
+	tok, err := jwt.NewBuilder().Issuer(tp.issuer).Subject("lets-roll-test").Audience([]string{aud}).
+		IssuedAt(time.Now()).Claim("scope", "eb:kill-report").Build()
+	if err != nil {
+		t.Fatalf("build token: %v", err)
+	}
+	signed, err := jwt.Sign(tok, jwt.WithKey(jwa.RS256, tp.signKey))
+	if err != nil {
+		t.Fatalf("sign: %v", err)
+	}
+	return string(signed)
+}

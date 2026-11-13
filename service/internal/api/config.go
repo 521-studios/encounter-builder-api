@@ -18,8 +18,8 @@ import (
 )
 
 // BuildConfig assembles the router Config from the environment: the OIDC
-// verifier, the DynamoDB-backed store, and the lets-roll client (whose base URL
-// is the OIDC issuer — lets-roll is both the token issuer and the /api/v1 host).
+// verifier, the DynamoDB-backed store, and the lets-roll client (at LETS_ROLL_URL,
+// which defaults to the OIDC issuer until the auth-service cut-over).
 // envDefault names ENV when it's unset. Shared by the lambda and local mains.
 func BuildConfig(ctx context.Context, envDefault string) (Config, error) {
 	issuer := os.Getenv("OIDC_ISSUER")
@@ -49,11 +49,30 @@ func BuildConfig(ctx context.Context, envDefault string) (Config, error) {
 		env = envDefault
 	}
 
+	// lets-roll's API host. It's the issuer today, but not after the auth-service
+	// cut-over (auth-service.md), so it's its own setting, defaulting to the issuer.
+	lrURL := os.Getenv("LETS_ROLL_URL")
+	if lrURL == "" {
+		lrURL = issuer
+	}
+
 	cfg := Config{
-		Auth:     verifier,
-		Env:      env,
-		Store:    store.New(dynamodb.NewFromConfig(awsCfg), table),
-		LetsRoll: letsroll.New(issuer),
+		Auth:            verifier,
+		Env:             env,
+		Store:           store.New(dynamodb.NewFromConfig(awsCfg), table),
+		LetsRoll:        letsroll.New(lrURL),
+		Service:         verifier,
+		ServiceAudience: "encounter-builder-" + env + "-svc",
+	}
+	// we5k.2.6: service tokens (lets-roll's kill reports) are verified against
+	// SVC_OIDC_ISSUER, defaulting to OIDC_ISSUER. Same issuer: share the GM
+	// verifier's JWKS cache (the audience is checked per route). Before the
+	// cut-over the issuer is lets-roll, which mints no service audience, so the
+	// service path admits nothing until the issuer config flips.
+	if svcIssuer := os.Getenv("SVC_OIDC_ISSUER"); svcIssuer != "" && svcIssuer != issuer {
+		if cfg.Service, err = auth.NewVerifier(ctx, auth.Config{Issuer: svcIssuer, Audience: cfg.ServiceAudience}); err != nil {
+			return Config{}, fmt.Errorf("service auth init: %w", err)
+		}
 	}
 	// §5b: push released loot to party-treasure when its Function URL is configured.
 	// Empty (local/unset) leaves PartyTreasure nil and the handler skips the push.
@@ -63,7 +82,7 @@ func BuildConfig(ctx context.Context, envDefault string) (Config, error) {
 	// we5k.2.3: off until lets-roll serves POST /api/v1/games/:id/eb_encounters
 	// (lets-roll-f6e). lets-roll is the OIDC issuer host.
 	if os.Getenv("LETS_ROLL_COMBAT_PUSH") == "true" {
-		cfg.CombatPush = combatpush.New(issuer, env, awsCfg.Credentials, awsCfg.Region)
+		cfg.CombatPush = combatpush.New(lrURL, env, awsCfg.Credentials, awsCfg.Region)
 	}
 	// we5k.2.4: off until lets-roll signs kill reports with its task role.
 	if arn := os.Getenv("LETS_ROLL_TASK_ROLE_ARN"); arn != "" {

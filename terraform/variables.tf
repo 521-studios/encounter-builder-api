@@ -26,6 +26,12 @@ variable "oidc_issuer" {
   # e.g. https://lets-roll.staging.521studios.com — set per env by the deploy.
 }
 
+variable "lets_roll_url" {
+  description = "lets-roll API base URL (its /api/v1 and the combat push). Today it equals oidc_issuer; it stays lets-roll when the issuer moves to the auth service (we5k.2.6)."
+  type        = string
+  # e.g. https://lets-roll.staging.521studios.com — set per env by the deploy.
+}
+
 variable "oidc_audience" {
   description = "Required JWT audience (SPA client_id); empty accepts any"
   type        = string
