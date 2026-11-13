@@ -25,7 +25,7 @@ func TestMonstersFrom_ExpandsCountAndSkipsNonMonsters(t *testing.T) {
 		{ID: "h", Type: model.ContentHazard, Monster: &model.MonsterEntry{Ref: model.ContentRef{GameID: "trap"}, Count: 1}},
 		{ID: "b", Type: model.ContentMonster, Monster: &model.MonsterEntry{Ref: model.ContentRef{GameID: "wolf"}}}, // count 0 → 1
 		{ID: "m", Type: model.ContentMarkdown},
-	}}
+	}, Kills: map[string]model.Kill{"a:2": {Killed: true}, "b:1": {Killed: false}}}
 	got, legacy := MonstersFrom(enc)
 	if strings.Join(legacy, ",") != "old" {
 		t.Fatalf("legacy = %v, want [old] (elite via the old adjustment field)", legacy)
@@ -36,6 +36,9 @@ func TestMonstersFrom_ExpandsCountAndSkipsNonMonsters(t *testing.T) {
 	}
 	if strings.Join(keys, ",") != "a:1,a:2,b:1" {
 		t.Fatalf("keys = %v", keys)
+	}
+	if got[0].Killed || !got[1].Killed || got[2].Killed {
+		t.Fatalf("killed flags: %+v", got)
 	}
 	if got[0].Nickname != "Boss" || got[0].Ref.GameID != "gob" {
 		t.Fatalf("fields: %+v", got[0])

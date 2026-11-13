@@ -25,7 +25,8 @@ func (s *stubPusher) Push(_ context.Context, bearer, game string, in combatpush.
 	return combatpush.Receipt{LetsRollEncounterID: 9, Kept: []combatpush.KeptMonster{{Key: "m1:2", Reason: "damaged"}}}, nil
 }
 
-const goblins = `{"name":"Goblins","content":[{"id":"m1","type":"monster","monster":{"ref":{"game_id":"gob"},"count":2,"adjustment":"none"}}]}`
+const goblinsContent = `[{"id":"m1","type":"monster","monster":{"ref":{"game_id":"gob"},"count":2,"adjustment":"none"}}]`
+const goblins = `{"name":"Goblins","content":` + goblinsContent + `}`
 
 func TestPushCombat(t *testing.T) {
 	h, _ := newHandler(t, true, 0)

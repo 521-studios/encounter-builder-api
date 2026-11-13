@@ -34,7 +34,9 @@ by the CloudFront origin-request-policy). The JWT is fully verified either way.
 Env: `OIDC_ISSUER` (required), `OIDC_AUDIENCE` (the SPA client_id), `ENV`,
 `ENCOUNTERS_TABLE`, `MAPS_BUCKET` (optional; unset makes map uploads 503),
 `PARTY_TREASURE_URL` (optional; unset disables the release push, retry 503s, and
-`/me` reports `party_treasure: false` so the SPA hides Release).
+`/me` reports `party_treasure: false` so the SPA hides Release),
+`LETS_ROLL_TASK_ROLE_ARN` (optional; lets-roll's ECS task role, whose STS
+identity in `X-LR-Identity` admits its kill reports; unset makes them 503).
 
 ## Dev
 ```bash

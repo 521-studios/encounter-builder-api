@@ -460,6 +460,10 @@ type Encounter struct {
 	// CombatPush is the latest push of this encounter's combat into lets-roll
 	// (we5k.2.3). nil = never pushed.
 	CombatPush *CombatPush `json:"combat_push,omitempty"`
+	// Kills is the kill state of individual creatures, keyed by eb_monster_key
+	// (we5k.2.4). It lives outside Content so the GM's full-replace PUT never
+	// clobbers a kill lets-roll reported: only the kill endpoints change it.
+	Kills map[string]Kill `json:"kills,omitempty"`
 	// ReleasePush is the latest push of the released loot to party-treasure:
 	// a receipt, or the error a GM can Retry past. nil = never pushed (6m14).
 	ReleasePush *ReleasePush `json:"release_push,omitempty"`
@@ -487,6 +491,53 @@ type CombatPush struct {
 	At                  time.Time     `json:"at"`
 	LetsRollEncounterID int           `json:"lets_roll_encounter_id"`
 	Kept                []KeptMonster `json:"kept,omitempty"`
+}
+
+// Kill is one creature's kill state. The latest change wins, by At, and EB's
+// stored state is the record (Devon, 2026-11-10).
+type Kill struct {
+	Killed bool       `json:"killed"`
+	At     time.Time  `json:"at"`
+	Source KillSource `json:"source"`
+}
+
+type KillSource string
+
+const (
+	KillSourceEB       KillSource = "eb"
+	KillSourceLetsRoll KillSource = "lets_roll"
+)
+
+// MonsterKey names creature n (1-based) of monster content item id, the key
+// lets-roll syncs and reports kills by.
+func MonsterKey(id string, n int) string { return fmt.Sprintf("%s:%d", id, n) }
+
+// HasCreature reports whether key names a creature of one of the encounter's
+// monster content items (count expanded, as the combat push does).
+func (e Encounter) HasCreature(key string) bool {
+	for _, c := range e.Content {
+		if c.Type != ContentMonster || c.Monster == nil {
+			continue
+		}
+		for n := 1; n <= max(1, c.Monster.Count); n++ {
+			if MonsterKey(c.ID, n) == key {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// MarkKill stores k for key unless a change at least as new is already stored.
+func (e *Encounter) MarkKill(key string, k Kill) bool {
+	if cur, ok := e.Kills[key]; ok && !k.At.After(cur.At) {
+		return false
+	}
+	if e.Kills == nil {
+		e.Kills = map[string]Kill{}
+	}
+	e.Kills[key] = k
+	return true
 }
 
 type KeptMonster struct {

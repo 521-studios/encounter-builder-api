@@ -72,6 +72,7 @@ func campaignRoutes(h *handler) http.Handler {
 		r.Get("/{encounterID}", h.getEncounter)
 		r.Put("/{encounterID}", h.updateEncounter)
 		r.Post("/{encounterID}/push-combat", h.pushCombat)
+		r.Post("/{encounterID}/kills", h.markKill)
 		r.Delete("/{encounterID}", h.deleteEncounter)
 		r.Post("/{encounterID}/release", h.releaseEncounter)
 		r.Post("/{encounterID}/release/retry", h.retryReleasePush)

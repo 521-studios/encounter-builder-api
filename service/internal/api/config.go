@@ -8,6 +8,7 @@ import (
 	"github.com/521studios/encounter-builder-api/internal/auth"
 	"github.com/521studios/encounter-builder-api/internal/combatpush"
 	"github.com/521studios/encounter-builder-api/internal/letsroll"
+	"github.com/521studios/encounter-builder-api/internal/lrident"
 	"github.com/521studios/encounter-builder-api/internal/maps"
 	"github.com/521studios/encounter-builder-api/internal/partytreasure"
 	"github.com/521studios/encounter-builder-api/internal/store"
@@ -63,6 +64,12 @@ func BuildConfig(ctx context.Context, envDefault string) (Config, error) {
 	// (lets-roll-f6e). lets-roll is the OIDC issuer host.
 	if os.Getenv("LETS_ROLL_COMBAT_PUSH") == "true" {
 		cfg.CombatPush = combatpush.New(issuer, env, awsCfg.Credentials, awsCfg.Region)
+	}
+	// we5k.2.4: off until lets-roll signs kill reports with its task role.
+	if arn := os.Getenv("LETS_ROLL_TASK_ROLE_ARN"); arn != "" {
+		if cfg.LetsRollIdentity, err = lrident.New(arn, env, awsCfg.Region); err != nil {
+			return Config{}, err
+		}
 	}
 	if bucket := os.Getenv("MAPS_BUCKET"); bucket != "" {
 		cfg.Maps = maps.New(s3.NewFromConfig(awsCfg), bucket)
