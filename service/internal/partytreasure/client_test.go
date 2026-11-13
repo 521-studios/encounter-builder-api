@@ -251,3 +251,42 @@ func TestItemInput_VariantWire(t *testing.T) {
 		t.Fatalf("base item must omit variant: %s", b)
 	}
 }
+
+// 77l2: each creature is a treasure source. Its gear moves only if it was
+// killed, unless the GM set the qty by hand; a dangling source moves as
+// ordinary treasure.
+func TestReleasePayload_GearFollowsKills(t *testing.T) {
+	gear := func(id, game, from string) model.ContentItem {
+		c := treasureItem(id, game, 1, "")
+		c.Treasure.FromCreature = from
+		return c
+	}
+	two := 2
+	override := gear("ovr", "Weapons:4", "m1:3")
+	override.Treasure.Qty, override.Treasure.QtyMoving = 2, &two // GM says it moves anyway
+	enc := model.Encounter{
+		Content: []model.ContentItem{
+			{ID: "m1", Type: model.ContentMonster, Monster: &model.MonsterEntry{Ref: model.ContentRef{GameID: "mitflit"}, Count: 3}},
+			gear("s1", "Weapons:1", "m1:1"), // killed
+			gear("s2", "Weapons:2", "m1:2"), // killed then revived
+			gear("s3", "Weapons:3", "m1:3"), // never killed
+			override,
+			gear("gone", "Weapons:5", "m1:9"), // count is 3: dangling
+		},
+		Kills: map[string]model.Kill{"m1:1": {Killed: true}, "m1:2": {Killed: false}},
+	}
+	items, _ := ReleasePayloadFromEncounter(enc)
+	got := map[string]int{}
+	for _, it := range items {
+		got[it.Ref.GameID] = it.Qty
+	}
+	want := map[string]int{"Weapons:1": 1, "Weapons:4": 2, "Weapons:5": 1}
+	if len(got) != len(want) {
+		t.Fatalf("items = %v, want %v", got, want)
+	}
+	for k, v := range want {
+		if got[k] != v {
+			t.Fatalf("items = %v, want %v", got, want)
+		}
+	}
+}

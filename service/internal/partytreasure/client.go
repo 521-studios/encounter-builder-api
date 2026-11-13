@@ -74,7 +74,7 @@ func ReleasePayloadFromEncounter(enc model.Encounter) (items []ItemInput, coins 
 			if t == nil || t.Ref.IsEmpty() {
 				continue // a destroyed/blank treasure line points at nothing
 			}
-			qty := t.Moving() // the GM's close-out exclusions, whole or partial
+			qty := enc.Moving(*t) // the GM's close-out exclusions, and gear of creatures not killed (77l2)
 			if unfound || qty < 1 {
 				continue // nothing moves; a qty-0 item would also fail
 				// party-treasure's qty>=1 validation and 400 the WHOLE push.
