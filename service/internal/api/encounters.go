@@ -283,16 +283,21 @@ func (h *handler) pushRelease(r *http.Request, enc *model.Encounter) {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 15*time.Second)
 	defer cancel()
 	items, coins := partytreasure.ReleasePayloadFromEncounter(*enc)
-	rcpt, err := h.cfg.PartyTreasure.PushRelease(ctx, enc.CampaignID, partytreasure.ReleaseInput{
+	push := model.ReleasePush{At: time.Now().UTC()}
+	if len(items) == 0 && coins == (model.Currency{}) {
+		// Nothing moves (a monster-only room, or everything excluded): don't write an
+		// empty ledger entry into party-treasure (tdqh).
+		push.Empty = true
+	} else if rcpt, err := h.cfg.PartyTreasure.PushRelease(ctx, enc.CampaignID, partytreasure.ReleaseInput{
 		ClientULID: enc.ID,
 		Items:      items,
 		Coins:      coins,
-	})
-	push := model.ReleasePush{At: time.Now().UTC(), LedgerID: rcpt.LedgerID, ItemCount: rcpt.ItemCount}
-	if err != nil {
+	}); err != nil {
 		slog.WarnContext(ctx, "party-treasure push failed",
 			"encounter", enc.ID, "campaign", enc.CampaignID, "error", err)
-		push.Error = err.Error() // rcpt is zero on error
+		push.Error = err.Error()
+	} else {
+		push.LedgerID, push.ItemCount = rcpt.LedgerID, rcpt.ItemCount
 	}
 	enc.ReleasePush = &push
 	if err := h.cfg.Store.Put(ctx, *enc); err != nil {

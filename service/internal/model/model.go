@@ -475,6 +475,8 @@ type ReleasePush struct {
 	LedgerID  string    `json:"ledger_id,omitempty"`
 	ItemCount int       `json:"item_count"`
 	Error     string    `json:"error,omitempty"`
+	// Empty: the package had nothing to move, so nothing was sent (tdqh).
+	Empty bool `json:"empty,omitempty"`
 }
 
 // CombatPush records the latest push of an encounter's monsters into a lets-roll
