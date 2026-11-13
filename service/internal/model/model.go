@@ -145,6 +145,12 @@ type TreasureLine struct {
 	// (e.g. "Striking (Greater)") — stable across data changes, unlike an index.
 	// Empty means the base item. Opaque to the API; the display library resolves it.
 	Variant string `json:"variant,omitempty"`
+	// FromCreature is the creature carrying this gear (77l2), as its
+	// eb_monster_key "<monster content item id>:<n>". Its gear moves only if
+	// that creature was killed (see Encounter.Moving). A key that no longer
+	// names a creature (count cut, monster deleted) is ignored: the line moves
+	// as ordinary treasure and the editor flags it.
+	FromCreature string `json:"from_creature,omitempty"`
 }
 
 // Moving is how many of the line move to the party at release: QtyMoving
@@ -526,6 +532,16 @@ func (e Encounter) HasCreature(key string) bool {
 		}
 	}
 	return false
+}
+
+// Moving is how many of line t move at release (77l2 live default): the GM's
+// QtyMoving or exclusion state wins; otherwise gear from a creature that
+// wasn't killed stays behind. A dangling FromCreature counts as no source.
+func (e Encounter) Moving(t TreasureLine) int {
+	if t.QtyMoving == nil && t.FromCreature != "" && e.HasCreature(t.FromCreature) && !e.Kills[t.FromCreature].Killed {
+		return 0
+	}
+	return t.Moving()
 }
 
 // MarkKill stores k for key unless a change at least as new is already stored.
