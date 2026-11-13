@@ -1306,6 +1306,15 @@ func TestUpdate_LifecycleAndCloseout(t *testing.T) {
 	if open := put(`{"name":"Hall","status":"executing"}`); open.Status != model.StatusExecuting || open.CompletedAt != nil {
 		t.Fatalf("reopen: %+v", open)
 	}
+	// Skipped is also "done": entering it stamps completed_at, and complete ↔ skipped
+	// keeps the original close-out time.
+	skipped := put(`{"name":"Hall","status":"skipped"}`)
+	if skipped.Status != model.StatusSkipped || skipped.CompletedAt == nil {
+		t.Fatalf("skipped: %+v", skipped)
+	}
+	if back := put(`{"name":"Hall","status":"complete"}`); back.CompletedAt == nil || !back.CompletedAt.Equal(*skipped.CompletedAt) {
+		t.Fatalf("skipped→complete reset completed_at: %+v", back)
+	}
 	if rec := do(t, router, http.MethodPut, base, `{"name":"Hall","status":"bogus"}`); rec.Code != http.StatusBadRequest {
 		t.Fatalf("bogus status = %d, want 400", rec.Code)
 	}
