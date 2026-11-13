@@ -92,6 +92,8 @@ const (
 	TreasureIntact    TreasureState = "intact"
 	TreasureConsumed  TreasureState = "consumed"
 	TreasureDestroyed TreasureState = "destroyed"
+	// TreasureLeftBehind: never found, or not carried off (we5k.2.5).
+	TreasureLeftBehind TreasureState = "left_behind"
 )
 
 // Gate is an optional discovery check that hides a treasure pool until the party
@@ -118,15 +120,20 @@ type ValueTiers struct {
 // TreasureLine is one treasure item in an encounter. Masking hides an
 // unidentified item's identity until the party identifies it.
 type TreasureLine struct {
-	LineID     string        `json:"line_id"`
-	Ref        ContentRef    `json:"ref"`
-	Qty        int           `json:"qty"`
-	Masked     bool          `json:"masked"`
-	MaskLabel  string        `json:"mask_label,omitempty"`
-	IdentifyDC int           `json:"identify_dc,omitempty"`
-	SaleClass  SaleClass     `json:"sale_class,omitempty"`
-	State      TreasureState `json:"state,omitempty"`
-	StateNote  string        `json:"state_note,omitempty"`
+	LineID     string     `json:"line_id"`
+	Ref        ContentRef `json:"ref"`
+	Qty        int        `json:"qty"`
+	Masked     bool       `json:"masked"`
+	MaskLabel  string     `json:"mask_label,omitempty"`
+	IdentifyDC int        `json:"identify_dc,omitempty"`
+	SaleClass  SaleClass  `json:"sale_class,omitempty"`
+	// State is why the line's excluded portion doesn't move to the party, with
+	// StateNote saying what happened. Intact = nothing excluded.
+	State     TreasureState `json:"state,omitempty"`
+	StateNote string        `json:"state_note,omitempty"`
+	// QtyMoving is how many of Qty move to the party at release (we5k.2.5 partial
+	// exclusion: 30 darts, 12 broken → 18). Nil = the State default; see Moving.
+	QtyMoving *int `json:"qty_moving,omitempty"`
 	// PoolID groups the line under a TreasurePool (where it's found). Empty or
 	// dangling (pool deleted) renders under the default pool — like a dangling
 	// chapter_id renders under "Unsorted" — so deleting a pool never orphans loot.
@@ -138,6 +145,18 @@ type TreasureLine struct {
 	// (e.g. "Striking (Greater)") — stable across data changes, unlike an index.
 	// Empty means the base item. Opaque to the API; the display library resolves it.
 	Variant string `json:"variant,omitempty"`
+}
+
+// Moving is how many of the line move to the party at release: QtyMoving
+// (capped at Qty) when set, else all of an intact line and none of a pruned one.
+func (t TreasureLine) Moving() int {
+	if t.QtyMoving != nil {
+		return max(0, min(*t.QtyMoving, t.Qty))
+	}
+	if t.State == "" || t.State == TreasureIntact {
+		return t.Qty
+	}
+	return 0
 }
 
 // TreasurePool groups treasure by where it's found (a module splits loot into
@@ -366,7 +385,22 @@ const (
 type PoolHeader struct {
 	Name string `json:"name,omitempty"`
 	Gate *Gate  `json:"gate,omitempty"`
+	// NotFound is the close-out "found?" toggle for a gated pool (we5k.2.5): the
+	// party never found it, so none of its loot or coins are released.
+	NotFound bool `json:"not_found,omitempty"`
 }
+
+// CoinDrop is the payload of a `coin` content item. The embedded Currency keeps
+// the JSON flat ({"gp":5}); a State other than intact excludes the whole drop
+// from release, with StateNote saying why (we5k.2.5).
+type CoinDrop struct {
+	Currency
+	State     TreasureState `json:"state,omitempty"`
+	StateNote string        `json:"state_note,omitempty"`
+}
+
+// Excluded reports whether the GM kept this drop from the party.
+func (c CoinDrop) Excluded() bool { return c.State != "" && c.State != TreasureIntact }
 
 // ContentItem is one entry in the ordered `content` list. Exactly one payload is set,
 // keyed by Type. Markdown carries markdown + box_text; Monster carries monster/hazard/
@@ -379,7 +413,7 @@ type ContentItem struct {
 	SkillCheck *SkillCheck   `json:"skill_check,omitempty"`
 	Pool       *PoolHeader   `json:"pool,omitempty"`
 	Treasure   *TreasureLine `json:"treasure,omitempty"`
-	Coin       *Currency     `json:"coin,omitempty"`
+	Coin       *CoinDrop     `json:"coin,omitempty"`
 	XPAward    *XPAward      `json:"xp_award,omitempty"`
 	Reward     *Reward       `json:"reward,omitempty"`
 }
@@ -631,7 +665,7 @@ func (in CampaignSettingsInput) Validate() error {
 
 var validAdjustments = map[Adjustment]bool{AdjustmentNone: true, AdjustmentElite: true, AdjustmentWeak: true}
 var validSaleClasses = map[SaleClass]bool{SaleNormal: true, SalePureTreasure: true}
-var validTreasureStates = map[TreasureState]bool{TreasureIntact: true, TreasureConsumed: true, TreasureDestroyed: true}
+var validTreasureStates = map[TreasureState]bool{TreasureIntact: true, TreasureConsumed: true, TreasureDestroyed: true, TreasureLeftBehind: true}
 var validRoomTypes = map[RoomType]bool{
 	RoomCombat: true, RoomHazard: true, RoomHaunt: true, RoomExploration: true,
 	RoomSocial: true, RoomKnowledge: true, RoomEmpty: true,
@@ -704,6 +738,9 @@ func validateTreasurePayload(t *TreasureLine, at string) error {
 		t.State = TreasureIntact
 	} else if !validTreasureStates[t.State] {
 		return fmt.Errorf("%s: invalid state %q", at, t.State)
+	}
+	if t.QtyMoving != nil && *t.QtyMoving < 0 {
+		return fmt.Errorf("%s: qty_moving must be >= 0", at)
 	}
 	if t.IdentifyDC < 0 {
 		return fmt.Errorf("%s: identify_dc must be >= 0", at)
@@ -1142,6 +1179,9 @@ func (in *EncounterInput) Validate() error {
 				if amt < 0 {
 					return fmt.Errorf("%s: coin amounts must be >= 0", at)
 				}
+			}
+			if c.Coin.State != "" && !validTreasureStates[c.Coin.State] {
+				return fmt.Errorf("%s: invalid coin state %q", at, c.Coin.State)
 			}
 		case ContentXPAward:
 			if c.XPAward == nil {

@@ -218,6 +218,12 @@ func (h *handler) releaseEncounter(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusConflict, errBody("encounter already released"))
 		return
 	}
+	// Release is the last step of close-out (we5k.2.5): only a complete or
+	// skipped encounter has a settled treasure package.
+	if !enc.Status.Canonical().Done() {
+		writeJSON(w, http.StatusConflict, errBody("close the encounter out (complete or skipped) before releasing"))
+		return
+	}
 	// Draft→done completeness gate (rvd4): releasing is where half-filled content
 	// rows must be finished (save-time validation is only structural). Block the
 	// release with the list of gaps so the client can point the GM at each, unless
