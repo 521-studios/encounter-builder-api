@@ -955,6 +955,33 @@ func TestRetryReleasePush_Guards(t *testing.T) {
 	}
 }
 
+// tdqh: a package with nothing moving (no loot, or all of it excluded) releases
+// without writing an empty ledger entry into party-treasure; the receipt says so.
+func TestRelease_EmptyPackageSkipsPush(t *testing.T) {
+	for name, body := range map[string]string{
+		"no loot":      `{"name":"Monsters only"}`,
+		"all excluded": `{"name":"Spent","content":[{"id":"c1","type":"coin","coin":{"gp":3,"state":"consumed","state_note":"bribe"}}]}`,
+	} {
+		h, _ := newHandler(t, true, 0)
+		rel := &stubReleaser{}
+		h.cfg.PartyTreasure = rel
+		router := campaignRoutes(h)
+		rec := do(t, router, http.MethodPost, encPath, body)
+		var enc model.Encounter
+		_ = json.Unmarshal(rec.Body.Bytes(), &enc)
+		closeOut(t, h, enc.ID)
+		if rec = do(t, router, http.MethodPost, encPath+"/"+enc.ID+"/release", ""); rec.Code != http.StatusOK {
+			t.Fatalf("%s: release = %d %s", name, rec.Code, rec.Body)
+		}
+		if rel.calls != 0 {
+			t.Errorf("%s: pushed %d times, want 0", name, rel.calls)
+		}
+		if p := getEnc(t, router, enc.ID).ReleasePush; p == nil || !p.Empty || p.Error != "" {
+			t.Errorf("%s: release_push = %+v, want empty receipt", name, p)
+		}
+	}
+}
+
 // With no PartyTreasure configured (nil), release works and nothing is pushed.
 func TestRelease_PushDisabledWhenNil(t *testing.T) {
 	h, _ := newHandler(t, true, 0) // newHandler leaves PartyTreasure nil
