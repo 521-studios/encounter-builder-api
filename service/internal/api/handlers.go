@@ -32,6 +32,8 @@ func (h *handler) me(w http.ResponseWriter, r *http.Request) {
 		"expiresAt": tok.Expiration(),
 		// The SPA hides Release and its receipt when party-treasure isn't wired up.
 		"party_treasure": h.cfg.PartyTreasure != nil,
+		// ...and "Run in lets-roll" when the combat push isn't wired up.
+		"combat_push": h.cfg.CombatPush != nil,
 	})
 }
 

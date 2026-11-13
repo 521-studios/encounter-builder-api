@@ -4,11 +4,13 @@
 package api
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
 	"time"
 
 	"github.com/521studios/encounter-builder-api/internal/auth"
+	"github.com/521studios/encounter-builder-api/internal/combatpush"
 	"github.com/521studios/encounter-builder-api/internal/letsroll"
 	"github.com/521studios/encounter-builder-api/internal/partytreasure"
 	"github.com/521studios/encounter-builder-api/internal/store"
@@ -27,6 +29,15 @@ type Config struct {
 	// Maps, when non-nil, stores chapter map images (muz0.1). Nil (no MAPS_BUCKET)
 	// makes the upload and new-key paths return 503.
 	Maps MapStore
+	// CombatPush, when non-nil, pushes an encounter's monsters into lets-roll
+	// (we5k.2.3). Nil (LETS_ROLL_COMBAT_PUSH unset) makes the route 503 and /me
+	// report combat_push: false so the SPA hides the button.
+	CombatPush CombatPusher
+}
+
+// CombatPusher is the lets-roll combat push (internal/combatpush.Client).
+type CombatPusher interface {
+	Push(ctx context.Context, bearer, gameID string, in combatpush.Input) (combatpush.Receipt, error)
 }
 
 // NewRouter wires the routes. The same *chi.Mux is served by cmd/lambda (via the
@@ -64,6 +75,7 @@ func NewRouter(cfg Config) *chi.Mux {
 			r.Delete("/{encounterID}", h.deleteEncounter)
 			r.Post("/{encounterID}/release", h.releaseEncounter)
 			r.Post("/{encounterID}/release/retry", h.retryReleasePush)
+			r.Post("/{encounterID}/push-combat", h.pushCombat)
 			r.Post("/{encounterID}/map-image/upload-url", h.encounterMapImageUploadURL)
 		})
 

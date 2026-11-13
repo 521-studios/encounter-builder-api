@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	neturl "net/url"
 	"strings"
 	"time"
 )
@@ -41,7 +42,7 @@ type Game struct {
 // FetchGame calls GET /api/v1/games/:id as the user (forwarding their bearer).
 // 404/403 collapse to ErrForbidden — the caller has no business with this game.
 func (c *Client) FetchGame(ctx context.Context, bearer, gameID string) (Game, error) {
-	url := fmt.Sprintf("%s/api/v1/games/%s", c.baseURL, gameID)
+	url := fmt.Sprintf("%s/api/v1/games/%s", c.baseURL, neturl.PathEscape(gameID))
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return Game{}, err
