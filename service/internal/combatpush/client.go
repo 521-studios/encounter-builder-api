@@ -116,6 +116,12 @@ type Client struct {
 	creds    aws.CredentialsProvider
 	region   string
 	now      func() time.Time
+	// Tokens, when set, switches the push to the auth service's scheme
+	// (we5k.2.6): EB's client-credentials token in X-Service-Token and the GM's
+	// in X-Access-Token, with no STS identity. Nil keeps X-EB-Identity + Bearer.
+	Tokens interface {
+		Token(context.Context) (string, error)
+	}
 }
 
 // New builds a Client. baseURL is lets-roll (LETS_ROLL_URL).
@@ -185,11 +191,6 @@ func (c *Client) Push(ctx context.Context, bearer, gameID string, in Input) (Rec
 	if err != nil {
 		return Receipt{}, fmt.Errorf("combatpush: marshal: %w", err)
 	}
-	sum := sha256.Sum256(body)
-	ident, err := c.identityHeader(ctx, hex.EncodeToString(sum[:]))
-	if err != nil {
-		return Receipt{}, err
-	}
 	target := fmt.Sprintf("%s/api/v1/games/%s/eb_encounters", c.baseURL, url.PathEscape(gameID))
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, target, bytes.NewReader(body))
 	if err != nil {
@@ -197,8 +198,22 @@ func (c *Client) Push(ctx context.Context, bearer, gameID string, in Input) (Rec
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
-	req.Header.Set("X-EB-Identity", ident)
-	req.Header.Set("Authorization", "Bearer "+bearer)
+	if c.Tokens != nil {
+		svc, err := c.Tokens.Token(ctx)
+		if err != nil {
+			return Receipt{}, fmt.Errorf("combatpush: service token: %w", err)
+		}
+		req.Header.Set("X-Service-Token", svc)
+		req.Header.Set("X-Access-Token", bearer)
+	} else {
+		sum := sha256.Sum256(body)
+		ident, err := c.identityHeader(ctx, hex.EncodeToString(sum[:]))
+		if err != nil {
+			return Receipt{}, err
+		}
+		req.Header.Set("X-EB-Identity", ident)
+		req.Header.Set("Authorization", "Bearer "+bearer)
+	}
 
 	resp, err := c.http.Do(req)
 	if err != nil {

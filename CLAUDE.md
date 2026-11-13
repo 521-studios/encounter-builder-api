@@ -47,6 +47,11 @@ JWT with `aud` = `encounter-builder-<env>-svc` and scope `eb:kill-report`, at mo
 5 min to live. Without that header it falls back to `X-LR-Identity` (lrident),
 which is deleted at the cut-over. Before the cut-over the issuer (lets-roll) mints
 no service audience, so the new path admits nothing.
+Outbound, once the service issuer differs from `LETS_ROLL_URL` (the cut-over),
+the combat push sends EB's client-credentials token (scope `lr:eb-push`,
+`internal/svctoken`, secret `auth-service/<env>/clients/encounter-builder-<env>`)
+in `X-Service-Token` and the GM's token in `X-Access-Token`, instead of the STS
+identity. If that secret can't be read, the push stays off.
 
 ## Dev
 ```bash

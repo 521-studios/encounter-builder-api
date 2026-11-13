@@ -191,6 +191,26 @@ resource "aws_iam_role_policy" "party_treasure_invoke" {
   policy = data.aws_iam_policy_document.party_treasure_invoke.json
 }
 
+# we5k.2.6: EB's own client credentials for the auth service, written by
+# 521-auth's client registration (auth-service/<env>/clients/<client_id>).
+# Read only after the issuer flips (see internal/api/config.go); granting it now
+# changes nothing. Secrets Manager appends a random 6-char suffix to the ARN.
+data "aws_caller_identity" "current" {}
+data "aws_region" "current" {}
+
+data "aws_iam_policy_document" "auth_client_secret" {
+  statement {
+    actions   = ["secretsmanager:GetSecretValue"]
+    resources = ["arn:aws:secretsmanager:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:secret:auth-service/${var.env}/clients/encounter-builder-${var.env}-??????"]
+  }
+}
+
+resource "aws_iam_role_policy" "auth_client_secret" {
+  name   = "${local.name}-auth-client-secret"
+  role   = aws_iam_role.lambda.id
+  policy = data.aws_iam_policy_document.auth_client_secret.json
+}
+
 data "aws_iam_policy_document" "dynamo" {
   statement {
     actions = [
