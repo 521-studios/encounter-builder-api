@@ -416,6 +416,9 @@ type Encounter struct {
 	CloseoutNotes string     `json:"closeout_notes,omitempty"`
 	CompletedAt   *time.Time `json:"completed_at,omitempty"`
 	ReleasedAt    *time.Time `json:"released_at,omitempty"`
+	// CombatPush is the latest push of this encounter's combat into lets-roll
+	// (we5k.2.3). nil = never pushed.
+	CombatPush *CombatPush `json:"combat_push,omitempty"`
 	// ReleasePush is the latest push of the released loot to party-treasure:
 	// a receipt, or the error a GM can Retry past. nil = never pushed (6m14).
 	ReleasePush *ReleasePush `json:"release_push,omitempty"`
@@ -431,6 +434,21 @@ type ReleasePush struct {
 	LedgerID  string    `json:"ledger_id,omitempty"`
 	ItemCount int       `json:"item_count"`
 	Error     string    `json:"error,omitempty"`
+}
+
+// CombatPush records the latest push of an encounter's monsters into a lets-roll
+// game. LetsRollEncounterID is lets-roll's encounter. Kept lists monsters a
+// re-push would have removed but lets-roll kept, because they were damaged or
+// killed (the SPA tells the GM).
+type CombatPush struct {
+	At                  time.Time     `json:"at"`
+	LetsRollEncounterID int           `json:"lets_roll_encounter_id"`
+	Kept                []KeptMonster `json:"kept,omitempty"`
+}
+
+type KeptMonster struct {
+	Key    string `json:"eb_monster_key"`
+	Reason string `json:"reason"`
 }
 
 // Chapter is a subdivision of a campaign that groups encounters (like an
