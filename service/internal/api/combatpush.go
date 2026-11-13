@@ -60,17 +60,29 @@ func (h *handler) pushCombat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	now := time.Now().UTC()
-	push := model.CombatPush{At: now, LetsRollEncounterID: rcpt.LetsRollEncounterID}
-	for _, k := range rcpt.Kept {
-		push.Kept = append(push.Kept, model.KeptMonster{Key: k.Key, Reason: k.Reason})
+	// Save on a fresh budget, onto a fresh read: the GM may have autosaved during
+	// the push, so apply only the status + receipt rather than writing back the
+	// copy loaded before it. Released meanwhile stays released.
+	saveCtx, cancelSave := context.WithTimeout(context.WithoutCancel(r.Context()), 5*time.Second)
+	defer cancelSave()
+	encID := enc.ID
+	enc, err = h.cfg.Store.Get(saveCtx, enc.CampaignID, encID)
+	if err == nil {
+		now := time.Now().UTC()
+		push := model.CombatPush{At: now, LetsRollEncounterID: rcpt.LetsRollEncounterID}
+		for _, k := range rcpt.Kept {
+			push.Kept = append(push.Kept, model.KeptMonster{Key: k.Key, Reason: k.Reason})
+		}
+		enc.CombatPush = &push
+		if enc.Status != model.StatusReleased {
+			enc.Status = model.StatusExecuting
+		}
+		enc.UpdatedAt = now
+		err = h.cfg.Store.Put(saveCtx, enc)
 	}
-	enc.CombatPush = &push
-	enc.Status = model.StatusExecuting
-	enc.UpdatedAt = now
-	if err := h.cfg.Store.Put(ctx, enc); err != nil {
+	if err != nil {
 		// lets-roll has the encounter; a retry replays it and saves the receipt.
-		slog.ErrorContext(ctx, "could not save combat push result", "encounter", enc.ID, "error", err)
+		slog.ErrorContext(saveCtx, "could not save combat push result", "encounter", encID, "error", err)
 		writeJSON(w, http.StatusInternalServerError, errBody("pushed to lets-roll, but could not save the result; push again"))
 		return
 	}

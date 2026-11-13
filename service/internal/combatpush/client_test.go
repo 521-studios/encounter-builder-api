@@ -85,6 +85,9 @@ func TestPush_SendsBoundSTSIdentity(t *testing.T) {
 	if h.Get("X-Eb-Audience") != "lets-roll-staging" || h.Get("X-Eb-Body-Sha256") != hex.EncodeToString(sum[:]) {
 		t.Fatalf("binding headers = %v", h)
 	}
+	if h.Get("Host") != "sts.us-east-2.amazonaws.com" || h.Get("Content-Length") != "43" {
+		t.Fatalf("host/content-length must be sent for an exact replay: %v", h)
+	}
 	authz := h.Get("Authorization")
 	if !strings.Contains(authz, "/us-east-2/sts/aws4_request") ||
 		!strings.Contains(authz, "x-eb-audience") || !strings.Contains(authz, "x-eb-body-sha256") {

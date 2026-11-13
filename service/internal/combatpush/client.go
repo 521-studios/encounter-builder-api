@@ -23,6 +23,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -153,10 +155,15 @@ func (c *Client) identityHeader(ctx context.Context, bodyHash string) (string, e
 	if err := c.signer.SignHTTP(ctx, creds, req, hex.EncodeToString(sum[:]), "sts", c.region, c.now()); err != nil {
 		return "", fmt.Errorf("combatpush: sign: %w", err)
 	}
+	// SignHTTP signs host and content-length without setting them as headers; send
+	// them too, so lets-roll's replay to STS reproduces the signed request exactly.
+	headers := req.Header.Clone()
+	headers.Set("Host", req.URL.Host)
+	headers.Set("Content-Length", strconv.Itoa(len(stsBody)))
 	raw, err := json.Marshal(identity{
 		URL:     stsURL,
 		Method:  http.MethodPost,
-		Headers: req.Header,
+		Headers: headers,
 		Body:    base64.StdEncoding.EncodeToString([]byte(stsBody)),
 	})
 	if err != nil {
@@ -178,8 +185,8 @@ func (c *Client) Push(ctx context.Context, bearer, gameID string, in Input) (Rec
 	if err != nil {
 		return Receipt{}, err
 	}
-	url := fmt.Sprintf("%s/api/v1/games/%s/eb_encounters", c.baseURL, gameID)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	target := fmt.Sprintf("%s/api/v1/games/%s/eb_encounters", c.baseURL, url.PathEscape(gameID))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, target, bytes.NewReader(body))
 	if err != nil {
 		return Receipt{}, err
 	}
