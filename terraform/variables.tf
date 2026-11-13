@@ -32,6 +32,12 @@ variable "lets_roll_url" {
   # e.g. https://lets-roll.staging.521studios.com — set per env by the deploy.
 }
 
+variable "svc_oidc_issuer" {
+  description = "Issuer for service tokens (X-Service-Token, we5k.2.6). Empty makes the Go code default to oidc_issuer, the pre-cut-over behaviour."
+  type        = string
+  default     = ""
+}
+
 variable "oidc_audience" {
   description = "Required JWT audience (SPA client_id); empty accepts any"
   type        = string

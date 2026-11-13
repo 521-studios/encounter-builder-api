@@ -41,6 +41,8 @@ jobs:
       TF_STATE_BUCKET: 521studios-infra-tfstate-242288027927
       OIDC_ISSUER: https://lets-roll.staging.521studios.com
       LETS_ROLL_URL: https://lets-roll.staging.521studios.com
+      # we5k.2.6 end-to-end check: service tokens only. Not the cut-over; OIDC_ISSUER stays lets-roll.
+      SVC_OIDC_ISSUER: https://auth.staging.521studios.com
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-go@v5
@@ -72,7 +74,7 @@ jobs:
         run: |
           set -o pipefail
           tofu plan -input=false -no-color -out=tfplan \
-            -var="env=staging" -var="oidc_issuer=${OIDC_ISSUER}" -var="lets_roll_url=${LETS_ROLL_URL}" \
+            -var="env=staging" -var="oidc_issuer=${OIDC_ISSUER}" -var="lets_roll_url=${LETS_ROLL_URL}" -var="svc_oidc_issuer=${SVC_OIDC_ISSUER}" \
             -var="tf_state_bucket=${TF_STATE_BUCKET}"
       - name: Guard against unreviewed destroys
         working-directory: terraform
