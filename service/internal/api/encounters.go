@@ -142,12 +142,12 @@ func (h *handler) updateEncounter(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, errBody(err.Error()))
 		return
 	}
-	// Update may move freely among prepared/executing/complete (latest change
+	// Update may move freely among prepared/executing/complete/skipped (latest change
 	// wins), never to released (that's the /release endpoint). Empty = as-is.
 	switch in.Status.Canonical() {
-	case "", model.StatusPrepared, model.StatusExecuting, model.StatusComplete:
+	case "", model.StatusPrepared, model.StatusExecuting, model.StatusComplete, model.StatusSkipped:
 	default:
-		writeJSON(w, http.StatusBadRequest, errBody("status must be prepared, executing or complete"))
+		writeJSON(w, http.StatusBadRequest, errBody("status must be prepared, executing, complete or skipped"))
 		return
 	}
 	existing.Name = in.Name
@@ -178,9 +178,9 @@ func (h *handler) updateEncounter(w http.ResponseWriter, r *http.Request) {
 	if in.Status != "" {
 		was := existing.Status.Canonical()
 		existing.Status = in.Status.Canonical()
-		if existing.Status != model.StatusComplete {
+		if !existing.Status.Done() {
 			existing.CompletedAt = nil
-		} else if was != model.StatusComplete {
+		} else if !was.Done() {
 			existing.CompletedAt = &now
 		}
 	}

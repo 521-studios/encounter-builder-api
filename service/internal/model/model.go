@@ -260,20 +260,26 @@ type Currency struct {
 // Status is the encounter lifecycle (we5k.2.1): prepared (built, not yet
 // played) → executing (combat/play under way) → complete (closed out, optionally
 // with notes) → released (loot handed to the party-treasure app; locks edits).
-// Non-combat encounters go prepared → complete directly. The GM may move freely
-// among the first three (latest change wins); released is only via /release.
+// Non-combat encounters go prepared → complete directly; skipped closes out an
+// encounter the party never ran and counts as done, like complete. The GM may
+// move freely among all but released (latest change wins); released is only via
+// /release.
 type Status string
 
 const (
 	StatusPrepared  Status = "prepared"
 	StatusExecuting Status = "executing"
 	StatusComplete  Status = "complete"
+	StatusSkipped   Status = "skipped"
 	StatusReleased  Status = "released"
 
 	// Pre-we5k.2.1 values, still in stored rows and older clients' saves.
 	statusLegacyDraft Status = "draft"
 	statusLegacyRun   Status = "run"
 )
+
+// Done reports whether the encounter is closed out (complete or skipped).
+func (s Status) Done() bool { return s == StatusComplete || s == StatusSkipped }
 
 // Canonical maps the legacy values onto the current lifecycle (draft → prepared,
 // run → executing); everything else is returned unchanged.
@@ -412,7 +418,8 @@ type Encounter struct {
 	MapRegion *MapRegion `json:"map_region,omitempty"`
 	MapImage  *MapImage  `json:"map_image,omitempty"`
 	// CloseoutNotes are the GM's optional notes from closing the encounter out
-	// (we5k.2.1); CompletedAt is when it last entered complete, nil when not complete.
+	// (we5k.2.1); CompletedAt is when it was last closed out (complete or skipped), nil
+	// while it isn't.
 	CloseoutNotes string     `json:"closeout_notes,omitempty"`
 	CompletedAt   *time.Time `json:"completed_at,omitempty"`
 	ReleasedAt    *time.Time `json:"released_at,omitempty"`
@@ -838,7 +845,7 @@ type EncounterInput struct {
 	// CloseoutNotes is omit-keeps (nil leaves it): a client that predates it
 	// (an old cached SPA tab) must not wipe the GM's close-out notes on autosave.
 	CloseoutNotes *string `json:"closeout_notes,omitempty"`
-	// Status is honored only by update, and only among prepared/executing/complete
+	// Status is honored only by update, and only among prepared/executing/complete/skipped
 	// (legacy draft/run accepted; release has its own endpoint). Empty means
 	// "leave unchanged".
 	Status Status `json:"status,omitempty"`
