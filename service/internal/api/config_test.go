@@ -2,8 +2,12 @@ package api
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"strings"
 	"testing"
+
+	"github.com/aws/aws-sdk-go-v2/service/secretsmanager"
 )
 
 func TestBuildConfig_RequiresEnv(t *testing.T) {
@@ -33,5 +37,31 @@ func TestBuildConfig_MapsBucketEnablesMapStore(t *testing.T) {
 	t.Setenv("MAPS_BUCKET", "b")
 	if cfg, err = BuildConfig(context.Background(), "test"); err != nil || cfg.Maps == nil {
 		t.Fatalf("MAPS_BUCKET set: maps=%v err=%v, want a store", cfg.Maps, err)
+	}
+}
+
+type fakeSecrets struct{ val *string }
+
+func (f fakeSecrets) GetSecretValue(_ context.Context, in *secretsmanager.GetSecretValueInput, _ ...func(*secretsmanager.Options)) (*secretsmanager.GetSecretValueOutput, error) {
+	if *in.SecretId != "auth-service/staging/clients/encounter-builder-staging" {
+		return nil, fmt.Errorf("unexpected secret %q", *in.SecretId)
+	}
+	if f.val == nil {
+		return nil, errors.New("ResourceNotFoundException")
+	}
+	return &secretsmanager.GetSecretValueOutput{SecretString: f.val}, nil
+}
+
+// we5k.2.6: EB's client credentials come from 521-auth's secret; anything but a
+// complete {client_id, client_secret} is an error (the push then stays off).
+func TestClientTokens(t *testing.T) {
+	str := func(s string) *string { return &s }
+	if _, err := clientTokens(context.Background(), fakeSecrets{str(`{"client_id":"encounter-builder-staging","client_secret":"x"}`)}, "https://auth.test", "staging"); err != nil {
+		t.Fatalf("valid secret: %v", err)
+	}
+	for name, v := range map[string]*string{"missing": nil, "not json": str("x"), "no secret": str(`{"client_id":"c"}`)} {
+		if _, err := clientTokens(context.Background(), fakeSecrets{v}, "https://auth.test", "staging"); err == nil {
+			t.Errorf("%s: want an error", name)
+		}
 	}
 }

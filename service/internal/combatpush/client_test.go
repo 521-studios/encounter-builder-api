@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -107,5 +108,37 @@ func TestPush_Non2xxIsError(t *testing.T) {
 	c.creds = credentials.NewStaticCredentialsProvider("AKID", "SECRET", "")
 	if _, err := c.Push(context.Background(), "gm-token", "42", Input{}); err == nil || !strings.Contains(err.Error(), "401") {
 		t.Fatalf("err = %v, want 401", err)
+	}
+}
+
+type fixedTokens struct {
+	tok string
+	err error
+}
+
+func (f fixedTokens) Token(context.Context) (string, error) { return f.tok, f.err }
+
+// we5k.2.6: with a token source the push carries EB's service token and the GM's
+// token in their own headers, and no STS identity or Authorization at all.
+func TestPush_ServiceTokenMode(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-Service-Token") != "svc-tok" || r.Header.Get("X-Access-Token") != "gm-token" {
+			t.Errorf("headers: svc=%q access=%q", r.Header.Get("X-Service-Token"), r.Header.Get("X-Access-Token"))
+		}
+		if r.Header.Get("Authorization") != "" || r.Header.Get("X-EB-Identity") != "" {
+			t.Error("old-scheme headers sent in service-token mode")
+		}
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer srv.Close()
+	c := New(srv.URL, "staging", aws.AnonymousCredentials{}, "us-east-2")
+	c.Tokens = fixedTokens{tok: "svc-tok"}
+	if _, err := c.Push(context.Background(), "gm-token", "42", Input{}); err != nil {
+		t.Fatalf("Push: %v", err)
+	}
+	c.Tokens = fixedTokens{err: errors.New("auth down")}
+	if _, err := c.Push(context.Background(), "gm-token", "42", Input{}); err == nil || !strings.Contains(err.Error(), "service token") {
+		t.Fatalf("err = %v, want a service token error", err)
 	}
 }
