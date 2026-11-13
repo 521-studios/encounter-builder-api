@@ -225,7 +225,8 @@ const maxServiceTTL = 5*time.Minute + 30*time.Second
 // audience (encounter-builder-<env>-svc, never a SPA client id) and whose scope
 // includes scope. A longer-lived token is refused, so a stolen one is good for
 // one kind of call for at most a few minutes. Fails closed with a 401. The
-// verified token is on the context (Token); its sub is a client id, not a user.
+// verified token is on the context (Token); its sub is a client id, not a user,
+// so Subject() stays "" here: never read Token().Subject() as a GM on these routes.
 func (v *Verifier) ServiceMiddleware(audience, scope string) func(http.Handler) http.Handler {
 	if audience == "" || scope == "" {
 		panic("auth: ServiceMiddleware needs an audience and a scope")
@@ -238,6 +239,10 @@ func (v *Verifier) ServiceMiddleware(audience, scope string) func(http.Handler) 
 				return
 			}
 			tok, err := v.verify(r.Context(), raw, audience)
+			// jwx accepts a token with no exp at all; a service token must have one.
+			if err == nil && tok.Expiration().IsZero() {
+				err = errors.New("service token has no exp")
+			}
 			if err == nil && time.Until(tok.Expiration()) > maxServiceTTL {
 				err = errors.New("service token lives longer than 5 minutes")
 			}

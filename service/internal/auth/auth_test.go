@@ -471,6 +471,7 @@ func TestServiceMiddleware(t *testing.T) {
 		{"lives too long", ServiceTokenHeader, tp.mint(t, func(b *jwt.Builder) *jwt.Builder {
 			return svc(b).Expiration(time.Now().Add(10 * time.Minute))
 		}), http.StatusUnauthorized},
+		{"no exp", ServiceTokenHeader, tp.mintNoExp(t, svcAud), http.StatusUnauthorized},
 		{"expired", ServiceTokenHeader, tp.mint(t, func(b *jwt.Builder) *jwt.Builder {
 			return svc(b).Expiration(time.Now().Add(-time.Minute))
 		}), http.StatusUnauthorized},
@@ -498,4 +499,20 @@ func TestServiceMiddleware(t *testing.T) {
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("GM middleware admitted a service token: %d", rec.Code)
 	}
+}
+
+// mintNoExp signs a service-shaped token with no exp claim at all (jwx would
+// otherwise accept it as never expiring).
+func (tp *testProvider) mintNoExp(t *testing.T, aud string) string {
+	t.Helper()
+	tok, err := jwt.NewBuilder().Issuer(tp.issuer).Subject("lets-roll-test").Audience([]string{aud}).
+		IssuedAt(time.Now()).Claim("scope", "eb:kill-report").Build()
+	if err != nil {
+		t.Fatalf("build token: %v", err)
+	}
+	signed, err := jwt.Sign(tok, jwt.WithKey(jwa.RS256, tp.signKey))
+	if err != nil {
+		t.Fatalf("sign: %v", err)
+	}
+	return string(signed)
 }

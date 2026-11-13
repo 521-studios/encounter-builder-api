@@ -18,8 +18,8 @@ import (
 )
 
 // BuildConfig assembles the router Config from the environment: the OIDC
-// verifier, the DynamoDB-backed store, and the lets-roll client (whose base URL
-// is the OIDC issuer — lets-roll is both the token issuer and the /api/v1 host).
+// verifier, the DynamoDB-backed store, and the lets-roll client (at LETS_ROLL_URL,
+// which defaults to the OIDC issuer until the auth-service cut-over).
 // envDefault names ENV when it's unset. Shared by the lambda and local mains.
 func BuildConfig(ctx context.Context, envDefault string) (Config, error) {
 	issuer := os.Getenv("OIDC_ISSUER")
