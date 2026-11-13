@@ -32,11 +32,21 @@ signature, so the SPA forwards the OIDC token in `X-Access-Token` (passed throug
 by the CloudFront origin-request-policy). The JWT is fully verified either way.
 
 Env: `OIDC_ISSUER` (required), `OIDC_AUDIENCE` (the SPA client_id), `ENV`,
+`LETS_ROLL_URL` (lets-roll's API host; defaults to `OIDC_ISSUER`, which stops
+being lets-roll at the auth-service cut-over), `SVC_OIDC_ISSUER` (service-token
+issuer; defaults to `OIDC_ISSUER`),
 `ENCOUNTERS_TABLE`, `MAPS_BUCKET` (optional; unset makes map uploads 503),
 `PARTY_TREASURE_URL` (optional; unset disables the release push, retry 503s, and
 `/me` reports `party_treasure: false` so the SPA hides Release),
 `LETS_ROLL_TASK_ROLE_ARN` (optional; lets-roll's ECS task role, whose STS
 identity in `X-LR-Identity` admits its kill reports; unset makes them 503).
+
+Service tokens (we5k.2.6, `../521-architect/docs/architecture/auth-service.md`):
+a kill report carrying `X-Service-Token` is judged only as a client-credentials
+JWT with `aud` = `encounter-builder-<env>-svc` and scope `eb:kill-report`, at most
+5 min to live. Without that header it falls back to `X-LR-Identity` (lrident),
+which is deleted at the cut-over. Before the cut-over the issuer (lets-roll) mints
+no service audience, so the new path admits nothing.
 
 ## Dev
 ```bash

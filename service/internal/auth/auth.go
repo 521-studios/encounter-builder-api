@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -182,6 +183,13 @@ func discoverJWKS(ctx context.Context, client *http.Client, issuer string) (stri
 // Verify parses and validates a raw bearer token, enforcing signature (against
 // the current JWKS), issuer, expiry, and — when configured — audience.
 func (v *Verifier) Verify(ctx context.Context, raw string) (jwt.Token, error) {
+	return v.verify(ctx, raw, v.audience)
+}
+
+// verify is Verify with the audience given per call, so one Verifier (one JWKS
+// cache) serves both the GM audience and the service audience when they share
+// an issuer.
+func (v *Verifier) verify(ctx context.Context, raw, audience string) (jwt.Token, error) {
 	// Resolve the jwks url on first use if startup discovery was deferred (the
 	// provider was down at boot); a persistent failure surfaces here as a 401.
 	jwksURL, err := v.resolve(ctx)
@@ -198,10 +206,58 @@ func (v *Verifier) Verify(ctx context.Context, raw string) (jwt.Token, error) {
 		jwt.WithIssuer(v.issuer),
 		jwt.WithAcceptableSkew(30 * time.Second),
 	}
-	if v.audience != "" {
-		opts = append(opts, jwt.WithAudience(v.audience))
+	if audience != "" {
+		opts = append(opts, jwt.WithAudience(audience))
 	}
 	return jwt.ParseString(raw, opts...)
+}
+
+// ServiceTokenHeader carries a service (client-credentials) token. User tokens
+// never ride here, and service tokens never ride in X-Access-Token or
+// Authorization (auth-service.md, "Service tokens").
+const ServiceTokenHeader = "X-Service-Token"
+
+// maxServiceTTL caps a service token's remaining lifetime: issuers mint them
+// with exp <= 5 min, and EB allows the same 30 s skew it allows on exp.
+const maxServiceTTL = 5*time.Minute + 30*time.Second
+
+// ServiceMiddleware admits only a service token from X-Service-Token whose aud is
+// audience (encounter-builder-<env>-svc, never a SPA client id) and whose scope
+// includes scope. A longer-lived token is refused, so a stolen one is good for
+// one kind of call for at most a few minutes. Fails closed with a 401. The
+// verified token is on the context (Token); its sub is a client id, not a user.
+func (v *Verifier) ServiceMiddleware(audience, scope string) func(http.Handler) http.Handler {
+	if audience == "" || scope == "" {
+		panic("auth: ServiceMiddleware needs an audience and a scope")
+	}
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			raw := strings.TrimSpace(r.Header.Get(ServiceTokenHeader))
+			if raw == "" {
+				writeUnauthorized(w, "missing service token")
+				return
+			}
+			tok, err := v.verify(r.Context(), raw, audience)
+			if err == nil && time.Until(tok.Expiration()) > maxServiceTTL {
+				err = errors.New("service token lives longer than 5 minutes")
+			}
+			if err == nil && !hasScope(tok, scope) {
+				err = fmt.Errorf("service token lacks scope %q", scope)
+			}
+			if err != nil {
+				slog.Warn("auth: service token rejected", "err", err)
+				writeUnauthorized(w, "invalid service token")
+				return
+			}
+			next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), tokenKey, tok)))
+		})
+	}
+}
+
+// hasScope reads the RFC 9068 space-delimited `scope` claim.
+func hasScope(tok jwt.Token, want string) bool {
+	s, _ := tok.PrivateClaims()["scope"].(string)
+	return slices.Contains(strings.Fields(s), want)
 }
 
 // Middleware requires a valid bearer token on every wrapped request and stashes

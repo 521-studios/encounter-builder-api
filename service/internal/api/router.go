@@ -37,6 +37,10 @@ type Config struct {
 	// LetsRollIdentity, when non-nil, admits lets-roll's server-to-server calls
 	// (kill reports, we5k.2.4). Nil (LETS_ROLL_TASK_ROLE_ARN unset) makes them 503.
 	LetsRollIdentity *lrident.Verifier
+	// Service verifies service (client-credentials) tokens from X-Service-Token
+	// against ServiceAudience (we5k.2.6). Nil disables that path.
+	Service         *auth.Verifier
+	ServiceAudience string
 }
 
 // CombatPusher is the lets-roll combat push (internal/combatpush.Client).
@@ -67,15 +71,7 @@ func NewRouter(cfg Config) *chi.Mux {
 	// a user token, and only on these routes. Dark (503) until
 	// LETS_ROLL_TASK_ROLE_ARN is set.
 	r.Group(func(r chi.Router) {
-		if cfg.LetsRollIdentity != nil {
-			r.Use(cfg.LetsRollIdentity.Middleware)
-		} else {
-			r.Use(func(http.Handler) http.Handler {
-				return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-					writeJSON(w, http.StatusServiceUnavailable, errBody("lets-roll kill reports are not configured"))
-				})
-			})
-		}
+		r.Use(cfg.letsRollCaller("eb:kill-report"))
 		r.Post("/api/app/campaigns/{campaignID}/encounters/{encounterID}/kill-reports", h.killReports)
 	})
 
@@ -154,4 +150,31 @@ func (w *statusWriter) Write(b []byte) (int, error) {
 	n, err := w.ResponseWriter.Write(b)
 	w.bytes += n
 	return n, err
+}
+
+// letsRollCaller admits lets-roll's server-to-server calls. A request carrying
+// X-Service-Token is judged only as a service token with this route's scope
+// (we5k.2.6, the auth-service cut-over); anything else falls back to the
+// X-LR-Identity STS proof (lrident, deleted at the cut-over), or 503 when that
+// isn't configured either.
+func (cfg Config) letsRollCaller(scope string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		var svc http.Handler
+		if cfg.Service != nil {
+			svc = cfg.Service.ServiceMiddleware(cfg.ServiceAudience, scope)(next)
+		}
+		lr := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			writeJSON(w, http.StatusServiceUnavailable, errBody("lets-roll kill reports are not configured"))
+		}))
+		if cfg.LetsRollIdentity != nil {
+			lr = cfg.LetsRollIdentity.Middleware(next)
+		}
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if svc != nil && r.Header.Get(auth.ServiceTokenHeader) != "" {
+				svc.ServeHTTP(w, r)
+				return
+			}
+			lr.ServeHTTP(w, r)
+		})
+	}
 }
