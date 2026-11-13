@@ -68,6 +68,16 @@ func TestSource_ErrorsAreErrors(t *testing.T) {
 			_ = json.NewEncoder(w).Encode(map[string]string{"token_endpoint": "http://" + r.Host + "/oauth/token"})
 		},
 		"no discovery": func(w http.ResponseWriter, r *http.Request) { http.NotFound(w, r) },
+		"token_endpoint on another host": func(w http.ResponseWriter, r *http.Request) {
+			_ = json.NewEncoder(w).Encode(map[string]string{"token_endpoint": "https://evil.test/oauth/token"})
+		},
+		"redirected token post": func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/oauth/token" {
+				http.Redirect(w, r, "https://evil.test/steal", http.StatusTemporaryRedirect)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]string{"token_endpoint": "http://" + r.Host + "/oauth/token"})
+		},
 	} {
 		srv := httptest.NewServer(h)
 		if _, err := New(srv.URL, "c", "s", "lr:eb-push").Token(context.Background()); err == nil {

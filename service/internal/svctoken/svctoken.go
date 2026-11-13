@@ -39,8 +39,12 @@ func New(issuer, clientID, secret, scope string) *Source {
 		clientID: clientID,
 		secret:   secret,
 		scope:    scope,
-		http:     &http.Client{Timeout: 5 * time.Second},
-		now:      time.Now,
+		// Never follow a redirect: a 307/308 would replay the secret elsewhere.
+		http: &http.Client{
+			Timeout:       5 * time.Second,
+			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+		},
+		now: time.Now,
 	}
 }
 
@@ -97,8 +101,10 @@ func (s *Source) discover(ctx context.Context) (string, error) {
 	if err := s.do(req, &doc); err != nil {
 		return "", err
 	}
-	if doc.TokenEndpoint == "" {
-		return "", fmt.Errorf("svctoken: discovery has no token_endpoint")
+	// The secret only ever goes to the issuer's own host.
+	te, err := url.Parse(doc.TokenEndpoint)
+	if err != nil || doc.TokenEndpoint == "" || te.Scheme != req.URL.Scheme || te.Host != req.URL.Host {
+		return "", fmt.Errorf("svctoken: token_endpoint %q is not on the issuer's host", doc.TokenEndpoint)
 	}
 	return doc.TokenEndpoint, nil
 }
