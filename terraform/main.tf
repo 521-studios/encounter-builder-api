@@ -257,6 +257,7 @@ resource "aws_lambda_function" "api" {
       ENCOUNTERS_TABLE   = aws_dynamodb_table.encounters.name
       OIDC_ISSUER        = var.oidc_issuer
       LETS_ROLL_URL      = var.lets_roll_url
+      SVC_OIDC_ISSUER    = var.svc_oidc_issuer
       OIDC_AUDIENCE      = var.oidc_audience
       PARTY_TREASURE_URL = data.terraform_remote_state.party_treasure.outputs.lambda_function_url
       MAPS_BUCKET        = aws_s3_bucket.maps.id
