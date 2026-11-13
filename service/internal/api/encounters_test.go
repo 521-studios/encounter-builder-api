@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/521studios/encounter-builder-api/internal/auth"
 	"github.com/521studios/encounter-builder-api/internal/letsroll"
@@ -154,7 +155,7 @@ func TestCreate_ThenGetAndList(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if created.ID == "" || created.CampaignID != "g1" || created.Status != model.StatusDraft {
+	if created.ID == "" || created.CampaignID != "g1" || created.Status != model.StatusPrepared {
 		t.Fatalf("server-owned fields wrong: %+v", created)
 	}
 
@@ -933,14 +934,14 @@ func TestUpdate_HappyPathAndStatusTransition(t *testing.T) {
 	_ = json.Unmarshal(rec.Body.Bytes(), &enc)
 	base := encPath + "/" + enc.ID
 
-	// draft -> run, with edited fields
+	// legacy "run" is accepted and stored as executing
 	rec = do(t, router, http.MethodPut, base, `{"name":"renamed","currency":{"gp":5},"status":"run"}`)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("update = %d, want 200; body=%s", rec.Code, rec.Body)
 	}
 	var updated model.Encounter
 	_ = json.Unmarshal(rec.Body.Bytes(), &updated)
-	if updated.Name != "renamed" || updated.Currency.GP != 5 || updated.Status != model.StatusRun {
+	if updated.Name != "renamed" || updated.Currency.GP != 5 || updated.Status != model.StatusExecuting {
 		t.Fatalf("update did not apply fields/status: %+v", updated)
 	}
 	if updated.ID != enc.ID || !updated.CreatedAt.Equal(enc.CreatedAt) {
@@ -1264,5 +1265,70 @@ func TestTreasureVariant_RoundTrips(t *testing.T) {
 	_ = json.Unmarshal(rec.Body.Bytes(), &enc)
 	if len(enc.Treasure) != 1 || enc.Treasure[0].Variant != "Striking (Greater)" {
 		t.Fatalf("treasure variant not preserved: %+v", enc.Treasure)
+	}
+}
+
+// we5k.2.1: prepared → executing → complete (or prepared → complete for non-combat),
+// close-out notes, completed_at set on entering complete and cleared on reopen.
+func TestUpdate_LifecycleAndCloseout(t *testing.T) {
+	h, _ := newHandler(t, true, 0)
+	router := campaignRoutes(h)
+	rec := do(t, router, http.MethodPost, encPath, `{"name":"Hall"}`)
+	var enc model.Encounter
+	_ = json.Unmarshal(rec.Body.Bytes(), &enc)
+	base := encPath + "/" + enc.ID
+	put := func(body string) model.Encounter {
+		t.Helper()
+		rec := do(t, router, http.MethodPut, base, body)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("PUT %s = %d; body=%s", body, rec.Code, rec.Body)
+		}
+		var out model.Encounter
+		_ = json.Unmarshal(rec.Body.Bytes(), &out)
+		return out
+	}
+
+	// Non-combat: prepared → complete directly, with notes.
+	done := put(`{"name":"Hall","status":"complete","closeout_notes":"party skipped the riddle"}`)
+	if done.Status != model.StatusComplete || done.CompletedAt == nil || done.CloseoutNotes != "party skipped the riddle" {
+		t.Fatalf("complete: %+v", done)
+	}
+	// Staying complete (e.g. editing notes) keeps the original completed_at.
+	again := put(`{"name":"Hall","status":"complete","closeout_notes":"edited"}`)
+	if again.CompletedAt == nil || !again.CompletedAt.Equal(*done.CompletedAt) || again.CloseoutNotes != "edited" {
+		t.Fatalf("re-save complete: %+v", again)
+	}
+	// Omitted status leaves it complete; omitted closeout_notes (an older client) keeps them.
+	if kept := put(`{"name":"Hall"}`); kept.Status != model.StatusComplete || kept.CompletedAt == nil || kept.CloseoutNotes != "edited" {
+		t.Fatalf("status omitted: %+v", kept)
+	}
+	// Reopen to executing clears completed_at (latest change wins; not forward-only).
+	if open := put(`{"name":"Hall","status":"executing"}`); open.Status != model.StatusExecuting || open.CompletedAt != nil {
+		t.Fatalf("reopen: %+v", open)
+	}
+	if rec := do(t, router, http.MethodPut, base, `{"name":"Hall","status":"bogus"}`); rec.Code != http.StatusBadRequest {
+		t.Fatalf("bogus status = %d, want 400", rec.Code)
+	}
+	// An explicit empty string clears the notes.
+	if cleared := put(`{"name":"Hall","closeout_notes":""}`); cleared.CloseoutNotes != "" {
+		t.Fatalf("clear notes: %+v", cleared)
+	}
+}
+
+// Rows stored before we5k.2.1 say draft/run; reads present the new names.
+func TestGet_PresentsLegacyStatus(t *testing.T) {
+	h, _ := newHandler(t, true, 0)
+	now := time.Now().UTC()
+	for legacy, want := range map[string]model.Status{"draft": model.StatusPrepared, "run": model.StatusExecuting} {
+		id := "old-" + legacy
+		if err := h.cfg.Store.Put(context.Background(), model.Encounter{ID: id, CampaignID: "g1", Name: "Old", Status: model.Status(legacy), CreatedAt: now, UpdatedAt: now}); err != nil {
+			t.Fatal(err)
+		}
+		rec := do(t, campaignRoutes(h), http.MethodGet, encPath+"/"+id, "")
+		var got model.Encounter
+		_ = json.Unmarshal(rec.Body.Bytes(), &got)
+		if got.Status != want {
+			t.Fatalf("stored %q presented as %q, want %q", legacy, got.Status, want)
+		}
 	}
 }

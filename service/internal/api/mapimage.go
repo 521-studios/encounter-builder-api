@@ -145,6 +145,7 @@ func presentChapter(ch model.Chapter) model.Chapter {
 
 func presentEncounter(enc model.Encounter) model.Encounter {
 	enc.MapImage = presentMapImage(enc.MapImage)
+	enc.Status = enc.Status.Canonical() // stored rows may still say draft/run
 	return enc
 }
 

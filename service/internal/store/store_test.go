@@ -59,7 +59,7 @@ func sampleEncounter() model.Encounter {
 		ID:         "enc-1",
 		CampaignID: "game-42",
 		Name:       "Goblin Ambush",
-		Status:     model.StatusDraft,
+		Status:     model.StatusPrepared,
 		Monsters: []model.MonsterEntry{{
 			Ref:        model.ContentRef{GameID: "abc123"},
 			Count:      3,
