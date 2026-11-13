@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"testing"
@@ -48,6 +49,13 @@ func TestMarkKill(t *testing.T) {
 	}
 	if rec := do(t, router, http.MethodPost, base+"/kills", `{"eb_monster_key":"m1:1","killed":true,"x":1}`); rec.Code != http.StatusBadRequest {
 		t.Fatalf("unknown field = %d, want 400", rec.Code)
+	}
+	// Released: the package is gone, so kills are frozen.
+	stored, _ := h.cfg.Store.Get(context.Background(), "g1", e.ID)
+	stored.Status = model.StatusReleased
+	_ = h.cfg.Store.Put(context.Background(), stored)
+	if rec := do(t, router, http.MethodPost, base+"/kills", `{"eb_monster_key":"m1:1","killed":true}`); rec.Code != http.StatusConflict {
+		t.Fatalf("released = %d, want 409", rec.Code)
 	}
 }
 
@@ -113,6 +121,19 @@ func TestKillReports(t *testing.T) {
 
 	if code, _ := report(`{"kills":[{"eb_monster_key":"m1:1","killed":true}]}`); code != http.StatusBadRequest {
 		t.Fatalf("missing at = %d, want 400", code)
+	}
+	if code, _ := report(`{"kills":[{"eb_monster_key":"m1:1","killed":true,"at":"` + t1 + `"},{"eb_monster_key":"m1:1","killed":false,"at":"` + t1 + `"}]}`); code != http.StatusBadRequest {
+		t.Fatalf("duplicate key = %d, want 400", code)
+	}
+	// A far-future at is clamped to now, so a later GM mark still wins.
+	future := time.Now().UTC().Add(24 * time.Hour).Format(time.RFC3339Nano)
+	report(`{"kills":[{"eb_monster_key":"m1:2","killed":false,"at":"` + future + `"}]}`)
+	do(t, gm, http.MethodPost, base+"/kills", `{"eb_monster_key":"m1:2","killed":true}`)
+	rec = do(t, gm, http.MethodGet, base, "")
+	got = model.Encounter{}
+	_ = json.Unmarshal(rec.Body.Bytes(), &got)
+	if k := got.Kills["m1:2"]; !k.Killed || k.Source != model.KillSourceEB {
+		t.Fatalf("GM mark after a future report = %+v, want killed by eb", k)
 	}
 	// Closed out: the package is built from the kills, so late reports are refused.
 	do(t, gm, http.MethodPut, base, `{"name":"Goblins","status":"complete","content":`+goblinsContent+`}`)

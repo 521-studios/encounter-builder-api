@@ -59,10 +59,21 @@ func (h *handler) killReports(w http.ResponseWriter, r *http.Request) {
 	if !decodeBody(w, r, &in) {
 		return
 	}
-	for _, k := range in.Kills {
+	now := time.Now().UTC()
+	seen := make(map[string]bool, len(in.Kills))
+	for i, k := range in.Kills {
 		if k.Key == "" || k.At.IsZero() {
 			writeJSON(w, http.StatusBadRequest, errBody("each kill needs eb_monster_key and at"))
 			return
+		}
+		if seen[k.Key] {
+			writeJSON(w, http.StatusBadRequest, errBody("each eb_monster_key may appear once per report"))
+			return
+		}
+		seen[k.Key] = true
+		// A future at (clock skew, or a bug) would outrank every later change.
+		if k.At.After(now) {
+			in.Kills[i].At = now
 		}
 	}
 	enc, ok := h.loadEncounter(w, r)
@@ -86,7 +97,7 @@ func (h *handler) killReports(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if changed {
-		enc.UpdatedAt = time.Now().UTC()
+		enc.UpdatedAt = now
 		if err := h.cfg.Store.Put(r.Context(), enc); err != nil {
 			writeJSON(w, http.StatusInternalServerError, errBody("could not save encounter"))
 			return

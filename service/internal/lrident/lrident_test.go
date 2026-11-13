@@ -128,6 +128,21 @@ func TestVerify(t *testing.T) {
 	if err := verifier(t, &stubSTS{arn: good, code: 403}).Verify(context.Background(), sign(t, body, nil, nil), body); !errors.Is(err, ErrDenied) {
 		t.Errorf("sts 403: err = %v, want denied", err)
 	}
+	if err := verifier(t, &stubSTS{arn: good, code: 503}).Verify(context.Background(), sign(t, body, nil, nil), body); err == nil || errors.Is(err, ErrDenied) {
+		t.Errorf("sts 503: err = %v, want a non-denied error", err)
+	}
+	// A duplicated audience is refused, and unsigned extras never reach STS.
+	dup := sign(t, body, nil, func(r *http.Request) {
+		r.Header.Add("X-LR-Audience", "lets-roll-staging")
+	})
+	if err := verifier(t, &stubSTS{arn: good}).Verify(context.Background(), dup, body); !errors.Is(err, ErrDenied) {
+		t.Errorf("duplicate audience: err = %v, want denied", err)
+	}
+	sts = &stubSTS{arn: good}
+	extra := sign(t, body, nil, func(r *http.Request) { r.Header.Set("Proxy-Authorization", "x") })
+	if err := verifier(t, sts).Verify(context.Background(), extra, body); err != nil || sts.got.Header.Get("Proxy-Authorization") != "" {
+		t.Errorf("unsigned extra header: err = %v, forwarded = %q", err, sts.got.Header.Get("Proxy-Authorization"))
+	}
 }
 
 func TestNew_RejectsNonRoleARN(t *testing.T) {

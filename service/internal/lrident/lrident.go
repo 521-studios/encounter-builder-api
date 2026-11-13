@@ -105,6 +105,11 @@ func (v *Verifier) Verify(ctx context.Context, header string, body []byte) error
 	for k, vs := range id.Headers { // canonicalize keys from the JSON map
 		h[http.CanonicalHeaderKey(k)] = vs
 	}
+	for _, k := range []string{authzHdr, audHdr, bodyHdr, dateHdr} {
+		if len(h[k]) != 1 {
+			return deny("%s must appear exactly once", k)
+		}
+	}
 	signed, err := signedHeaders(h.Get(authzHdr))
 	if err != nil {
 		return err
@@ -125,7 +130,7 @@ func (v *Verifier) Verify(ctx context.Context, header string, body []byte) error
 	if err != nil || v.now().Sub(at).Abs() > maxSkew {
 		return deny("stale or missing X-Amz-Date")
 	}
-	arn, err := v.replay(ctx, h)
+	arn, err := v.replay(ctx, h, signed)
 	if err != nil {
 		return err
 	}
@@ -151,20 +156,28 @@ type getCallerIdentityResponse struct {
 
 // replay sends the signed request to STS (never anywhere else: the URL was
 // checked against our own regional endpoint) and returns the caller's ARN.
-func (v *Verifier) replay(ctx context.Context, h http.Header) (string, error) {
+// Only the signed headers (plus Authorization) are forwarded.
+func (v *Verifier) replay(ctx context.Context, h http.Header, signed []string) (string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, v.stsURL, bytes.NewReader([]byte(stsBody)))
 	if err != nil {
 		return "", err
 	}
-	req.Header = h.Clone()
-	req.Header.Del("Host") // set from the URL; it was checked above
-	req.Header.Del("Content-Length")
+	for _, k := range append(signed, authzHdr) {
+		k = http.CanonicalHeaderKey(k)
+		if k == "Host" || k == "Content-Length" {
+			continue // Go sets both from the URL and body, which were checked above
+		}
+		req.Header[k] = h[k]
+	}
 	resp, err := v.http.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("lrident: sts: %w", err)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
+	switch {
+	case resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500:
+		return "", fmt.Errorf("lrident: sts unavailable (%d)", resp.StatusCode) // 502, so lets-roll retries
+	case resp.StatusCode != http.StatusOK:
 		return "", deny("sts returned %d", resp.StatusCode)
 	}
 	var out getCallerIdentityResponse
