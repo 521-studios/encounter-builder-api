@@ -983,6 +983,9 @@ func (in *EncounterInput) Validate() error {
 		} else if !validTreasureStates[t.State] {
 			return fmt.Errorf("treasure[%d]: invalid state %q", i, t.State)
 		}
+		if t.QtyMoving != nil && *t.QtyMoving < 0 {
+			return fmt.Errorf("treasure[%d]: qty_moving must be >= 0", i)
+		}
 		if t.IdentifyDC < 0 {
 			return fmt.Errorf("treasure[%d]: identify_dc must be >= 0", i)
 		}

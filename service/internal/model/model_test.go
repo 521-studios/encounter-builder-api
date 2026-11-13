@@ -36,6 +36,7 @@ func TestEncounterInput_Validate(t *testing.T) {
 			EncounterInput{Name: "x", Content: []ContentItem{{ID: "t", Type: ContentTreasure, Treasure: &TreasureLine{Ref: pristine, Qty: 3, QtyMoving: ip(-1)}}}},
 			true,
 		},
+		"legacy qty_moving < 0": {EncounterInput{Name: "x", Treasure: []TreasureLine{{Ref: pristine, Qty: 3, QtyMoving: ip(-1)}}}, true},
 		"coin excluded ok": {
 			EncounterInput{Name: "x", Content: []ContentItem{{ID: "c", Type: ContentCoin, Coin: &CoinDrop{Currency: Currency{GP: 1}, State: TreasureConsumed, StateNote: "bribe"}}}},
 			false,
