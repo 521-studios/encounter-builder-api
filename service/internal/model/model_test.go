@@ -27,6 +27,24 @@ func TestEncounterInput_Validate(t *testing.T) {
 		"bad sale_class":    {EncounterInput{Name: "x", Treasure: []TreasureLine{{Ref: pristine, Qty: 1, SaleClass: "junk"}}}, true},
 		"bad state":         {EncounterInput{Name: "x", Treasure: []TreasureLine{{Ref: pristine, Qty: 1, State: "vaporized"}}}, true},
 		"negative currency": {EncounterInput{Name: "x", Currency: Currency{GP: -1}}, true},
+		"left_behind ok":    {EncounterInput{Name: "x", Treasure: []TreasureLine{{Ref: pristine, Qty: 1, State: TreasureLeftBehind}}}, false},
+		"qty_moving ok": {
+			EncounterInput{Name: "x", Content: []ContentItem{{ID: "t", Type: ContentTreasure, Treasure: &TreasureLine{Ref: pristine, Qty: 3, QtyMoving: ip(0)}}}},
+			false,
+		},
+		"qty_moving < 0": {
+			EncounterInput{Name: "x", Content: []ContentItem{{ID: "t", Type: ContentTreasure, Treasure: &TreasureLine{Ref: pristine, Qty: 3, QtyMoving: ip(-1)}}}},
+			true,
+		},
+		"legacy qty_moving < 0": {EncounterInput{Name: "x", Treasure: []TreasureLine{{Ref: pristine, Qty: 3, QtyMoving: ip(-1)}}}, true},
+		"coin excluded ok": {
+			EncounterInput{Name: "x", Content: []ContentItem{{ID: "c", Type: ContentCoin, Coin: &CoinDrop{Currency: Currency{GP: 1}, State: TreasureConsumed, StateNote: "bribe"}}}},
+			false,
+		},
+		"coin bad state": {
+			EncounterInput{Name: "x", Content: []ContentItem{{ID: "c", Type: ContentCoin, Coin: &CoinDrop{Currency: Currency{GP: 1}, State: "lost"}}}},
+			true,
+		},
 		"value_tiers negative": {
 			EncounterInput{Name: "x", Treasure: []TreasureLine{{Ref: pristine, Qty: 1, ValueTiers: &ValueTiers{Success: ip(-1)}}}},
 			true,
@@ -110,6 +128,29 @@ func TestEncounterInput_Validate(t *testing.T) {
 		err := in.Validate()
 		if (err != nil) != tc.wantErr {
 			t.Errorf("%s: err=%v, wantErr=%v", name, err, tc.wantErr)
+		}
+	}
+}
+
+func TestTreasureLine_Moving(t *testing.T) {
+	ip := func(n int) *int { return &n }
+	cases := []struct {
+		name string
+		line TreasureLine
+		want int
+	}{
+		{"intact = all", TreasureLine{Qty: 3, State: TreasureIntact}, 3},
+		{"unset state = all", TreasureLine{Qty: 3}, 3},
+		{"pruned = none", TreasureLine{Qty: 3, State: TreasureConsumed}, 0},
+		{"left behind = none", TreasureLine{Qty: 3, State: TreasureLeftBehind}, 0},
+		{"partial", TreasureLine{Qty: 30, State: TreasureDestroyed, QtyMoving: ip(18)}, 18},
+		{"qty_moving wins over intact", TreasureLine{Qty: 3, QtyMoving: ip(1)}, 1},
+		{"capped at qty", TreasureLine{Qty: 2, QtyMoving: ip(9)}, 2},
+		{"never negative", TreasureLine{Qty: 2, QtyMoving: ip(-4)}, 0},
+	}
+	for _, c := range cases {
+		if got := c.line.Moving(); got != c.want {
+			t.Errorf("%s: Moving() = %d, want %d", c.name, got, c.want)
 		}
 	}
 }
@@ -199,7 +240,7 @@ func TestIncompleteContent(t *testing.T) {
 			Alternatives: []SkillOption{{Skill: "Nature", DC: 10}}}},
 		{ID: "pool", Type: ContentPool, Pool: &PoolHeader{Name: "altar", Gate: &Gate{Skill: "Perception", DC: 18}}},
 		{ID: "tr", Type: ContentTreasure, Treasure: &TreasureLine{Ref: goodRef, Qty: 1}},
-		{ID: "coin", Type: ContentCoin, Coin: &Currency{GP: 5}},
+		{ID: "coin", Type: ContentCoin, Coin: &CoinDrop{Currency: Currency{GP: 5}}},
 		{ID: "xp", Type: ContentXPAward, XPAward: &XPAward{Amount: 30}},
 		{ID: "rw", Type: ContentReward, Reward: &Reward{Kind: RewardInformation, Label: "lore"}},
 	}
@@ -226,7 +267,7 @@ func TestIncompleteContent(t *testing.T) {
 			Alternatives: []SkillOption{{Skill: "", DC: 0}}}},
 		{ID: "pool", Type: ContentPool, Pool: &PoolHeader{Gate: &Gate{DC: 0}}}, // no name, bad gate
 		{ID: "tr", Type: ContentTreasure, Treasure: &TreasureLine{Qty: 0}},     // no item, qty 0
-		{ID: "coin", Type: ContentCoin, Coin: &Currency{}},                     // all zero
+		{ID: "coin", Type: ContentCoin, Coin: &CoinDrop{Currency: Currency{}}}, // all zero
 		{ID: "xp", Type: ContentXPAward, XPAward: &XPAward{}},                  // amount 0
 		{ID: "rw", Type: ContentReward, Reward: &Reward{Kind: "bogus"}},        // bad kind, no label
 	}

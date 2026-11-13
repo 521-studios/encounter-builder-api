@@ -332,7 +332,7 @@ func TestEncounterMapImage_UploadSetPresentRemove(t *testing.T) {
 
 func TestEncounterMapImage_ReleasePresentsURL(t *testing.T) {
 	router, _, path, key := encMapFixture(t)
-	if code, _ := putEncounter(t, router, path, `,"map_image":{"key":"`+key+`","width":1,"height":1}`); code != http.StatusOK {
+	if code, _ := putEncounter(t, router, path, `,"map_image":{"key":"`+key+`","width":1,"height":1},"status":"complete"`); code != http.StatusOK {
 		t.Fatalf("set = %d", code)
 	}
 	rec := do(t, router, http.MethodPost, path+"/release", "")

@@ -29,8 +29,8 @@ func TestReleasePayload_TreasureAndCoins(t *testing.T) {
 		{ID: "md", Type: model.ContentMarkdown, Markdown: &model.TextBlock{Body: "prose"}},
 		{ID: "mon", Type: model.ContentMonster, Monster: &model.MonsterEntry{Ref: model.ContentRef{GameID: "Monsters:1"}, Count: 2}},
 		treasureItem("t1", "Weapons:1", 2, model.TreasureIntact),
-		{ID: "coin1", Type: model.ContentCoin, Coin: &model.Currency{GP: 12, SP: 5}},
-		{ID: "coin2", Type: model.ContentCoin, Coin: &model.Currency{GP: 8, PP: 1}},
+		{ID: "coin1", Type: model.ContentCoin, Coin: &model.CoinDrop{Currency: model.Currency{GP: 12, SP: 5}}},
+		{ID: "coin2", Type: model.ContentCoin, Coin: &model.CoinDrop{Currency: model.Currency{GP: 8, PP: 1}}},
 		{ID: "xp", Type: model.ContentXPAward, XPAward: &model.XPAward{Amount: 30}},
 	}}
 	items, coins := ReleasePayloadFromEncounter(enc)
@@ -76,14 +76,14 @@ func TestReleasePayload_NameFromRefJSON(t *testing.T) {
 
 func TestReleasePayload_SkipsBlankAndPrunedTreasure(t *testing.T) {
 	enc := model.Encounter{Content: []model.ContentItem{
-		{ID: "blank", Type: model.ContentTreasure, Treasure: &model.TreasureLine{Qty: 1}}, // no ref
-		{ID: "nilpay", Type: model.ContentTreasure, Treasure: nil},                        // no payload
-		treasureItem("gone", "Weapons:2", 1, model.TreasureDestroyed),                     // GM destroyed
-		treasureItem("drunk", "Potions:1", 1, model.TreasureConsumed),                     // GM consumed
-		treasureItem("zeroqty", "Weapons:4", 0, model.TreasureIntact),                     // qty 0 → skipped (would 400 the whole push)
-		treasureItem("keep", "Weapons:3", 1, model.TreasureIntact),                        // the only survivor
-		{ID: "zerocoin", Type: model.ContentCoin, Coin: &model.Currency{}},                // zero coins, harmless
-		{ID: "nilcoin", Type: model.ContentCoin, Coin: nil},                               // nil coin payload → skipped
+		{ID: "blank", Type: model.ContentTreasure, Treasure: &model.TreasureLine{Qty: 1}},            // no ref
+		{ID: "nilpay", Type: model.ContentTreasure, Treasure: nil},                                   // no payload
+		treasureItem("gone", "Weapons:2", 1, model.TreasureDestroyed),                                // GM destroyed
+		treasureItem("drunk", "Potions:1", 1, model.TreasureConsumed),                                // GM consumed
+		treasureItem("zeroqty", "Weapons:4", 0, model.TreasureIntact),                                // qty 0 → skipped (would 400 the whole push)
+		treasureItem("keep", "Weapons:3", 1, model.TreasureIntact),                                   // the only survivor
+		{ID: "zerocoin", Type: model.ContentCoin, Coin: &model.CoinDrop{Currency: model.Currency{}}}, // zero coins, harmless
+		{ID: "nilcoin", Type: model.ContentCoin, Coin: nil},                                          // nil coin payload → skipped
 	}}
 	items, coins := ReleasePayloadFromEncounter(enc)
 	if len(items) != 1 || items[0].Ref.GameID != "Weapons:3" {
@@ -91,6 +91,49 @@ func TestReleasePayload_SkipsBlankAndPrunedTreasure(t *testing.T) {
 	}
 	if coins != (model.Currency{}) {
 		t.Fatalf("coins = %+v, want zero", coins)
+	}
+}
+
+// we5k.2.5 close-out: partial qty, left-behind lines, excluded coins, and a gated
+// pool the party never found (its loot + coins skipped until the next pool).
+func TestReleasePayload_CloseOutExclusions(t *testing.T) {
+	ptr := func(n int) *int { return &n }
+	darts := treasureItem("darts", "Weapons:5", 30, model.TreasureDestroyed)
+	darts.Treasure.QtyMoving = ptr(18) // 12 broke
+	over := treasureItem("over", "Weapons:6", 2, model.TreasureIntact)
+	over.Treasure.QtyMoving = ptr(9) // stale after qty was lowered → capped at qty
+	coin := func(id string, gp int, st model.TreasureState) model.ContentItem {
+		return model.ContentItem{ID: id, Type: model.ContentCoin, Coin: &model.CoinDrop{Currency: model.Currency{GP: gp}, State: st}}
+	}
+	enc := model.Encounter{Content: []model.ContentItem{
+		darts,
+		over,
+		treasureItem("left", "Weapons:7", 1, model.TreasureLeftBehind),
+		coin("spent", 100, model.TreasureConsumed),
+		coin("kept", 5, ""),
+		{ID: "altar", Type: model.ContentPool, Pool: &model.PoolHeader{Name: "Altar", Gate: &model.Gate{Skill: "Perception", DC: 18}, NotFound: true}},
+		treasureItem("hidden", "Weapons:8", 1, model.TreasureIntact),
+		coin("hiddencoin", 50, model.TreasureIntact),
+		{ID: "chest", Type: model.ContentPool, Pool: &model.PoolHeader{Name: "Chest"}},
+		treasureItem("found", "Weapons:9", 1, model.TreasureIntact),
+		coin("chestcoin", 7, ""),
+	}}
+	items, coins := ReleasePayloadFromEncounter(enc)
+	got := map[string]int{}
+	for _, it := range items {
+		got[it.Ref.GameID] = it.Qty
+	}
+	want := map[string]int{"Weapons:5": 18, "Weapons:6": 2, "Weapons:9": 1}
+	if len(got) != len(want) {
+		t.Fatalf("items = %v, want %v", got, want)
+	}
+	for k, v := range want {
+		if got[k] != v {
+			t.Fatalf("items = %v, want %v", got, want)
+		}
+	}
+	if coins != (model.Currency{GP: 12}) {
+		t.Fatalf("coins = %+v, want 12 gp (kept 5 + chest 7)", coins)
 	}
 }
 

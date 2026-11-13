@@ -64,33 +64,33 @@ type Releaser interface {
 // are blank treasure lines (no ref) and lines the GM pruned post-encounter
 // (consumed/destroyed). Pure.
 func ReleasePayloadFromEncounter(enc model.Encounter) (items []ItemInput, coins model.Currency) {
+	unfound := false // inside a pool the GM marked not found at close-out
 	for _, c := range enc.Content {
 		switch c.Type {
+		case model.ContentPool:
+			unfound = c.Pool != nil && c.Pool.NotFound
 		case model.ContentTreasure:
 			t := c.Treasure
 			if t == nil || t.Ref.IsEmpty() {
 				continue // a destroyed/blank treasure line points at nothing
 			}
-			if t.State == model.TreasureConsumed || t.State == model.TreasureDestroyed {
-				continue // the GM pruned it; it never reaches the party
-			}
-			if t.Qty < 1 {
-				continue // a qty-0 line (allowed at save / via ?force) would fail
-				// party-treasure's qty>=1 validation and 400 the WHOLE push — skip it
-				// so the rest of the loot + coins still land.
+			qty := t.Moving() // the GM's close-out exclusions, whole or partial
+			if unfound || qty < 1 {
+				continue // nothing moves; a qty-0 item would also fail
+				// party-treasure's qty>=1 validation and 400 the WHOLE push.
 			}
 			items = append(items, ItemInput{
 				Ref:        t.Ref,
 				Variant:    t.Variant,
 				Name:       refName(t.Ref), // "" for pristine refs; party-treasure-web falls back to the pfsrd2 name
-				Qty:        t.Qty,
+				Qty:        qty,
 				Masked:     t.Masked,
 				MaskLabel:  t.MaskLabel,
 				IdentifyDC: t.IdentifyDC,
 				SaleClass:  t.SaleClass,
 			})
 		case model.ContentCoin:
-			if c.Coin == nil {
+			if c.Coin == nil || unfound || c.Coin.Excluded() {
 				continue
 			}
 			coins.CP += c.Coin.CP

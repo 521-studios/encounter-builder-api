@@ -105,6 +105,20 @@ func newHandler(t *testing.T, amGM bool, status int) (*handler, *memDynamo) {
 	}}, mem
 }
 
+// closeOut marks an encounter complete in the store: release requires a
+// closed-out encounter (we5k.2.5), and a PUT would replace its content.
+func closeOut(t *testing.T, h *handler, id string) {
+	t.Helper()
+	enc, err := h.cfg.Store.Get(context.Background(), "g1", id)
+	if err != nil {
+		t.Fatalf("closeOut get: %v", err)
+	}
+	enc.Status = model.StatusComplete
+	if err := h.cfg.Store.Put(context.Background(), enc); err != nil {
+		t.Fatalf("closeOut put: %v", err)
+	}
+}
+
 func do(t *testing.T, router http.Handler, method, path, body string) *httptest.ResponseRecorder {
 	t.Helper()
 	var r *http.Request
@@ -634,6 +648,7 @@ func TestRelease_LifecycleAndImmutability(t *testing.T) {
 	_ = json.Unmarshal(rec.Body.Bytes(), &enc)
 	base := encPath + "/" + enc.ID
 
+	closeOut(t, h, enc.ID)
 	rec = do(t, router, http.MethodPost, base+"/release", "")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("release = %d, want 200", rec.Code)
@@ -654,6 +669,28 @@ func TestRelease_LifecycleAndImmutability(t *testing.T) {
 	}
 }
 
+// we5k.2.5: release is the end of close-out, so only complete or skipped
+// encounters can release.
+func TestRelease_RequiresClosedOut(t *testing.T) {
+	h, _ := newHandler(t, true, 0)
+	router := campaignRoutes(h)
+	for status, want := range map[string]int{
+		"prepared": http.StatusConflict, "executing": http.StatusConflict,
+		"complete": http.StatusOK, "skipped": http.StatusOK,
+	} {
+		rec := do(t, router, http.MethodPost, encPath, `{"name":"Loot"}`)
+		var enc model.Encounter
+		_ = json.Unmarshal(rec.Body.Bytes(), &enc)
+		base := encPath + "/" + enc.ID
+		if rec = do(t, router, http.MethodPut, base, `{"name":"Loot","status":"`+status+`"}`); rec.Code != http.StatusOK {
+			t.Fatalf("%s: put = %d %s", status, rec.Code, rec.Body)
+		}
+		if rec = do(t, router, http.MethodPost, base+"/release", ""); rec.Code != want {
+			t.Errorf("release from %s = %d, want %d; body=%s", status, rec.Code, want, rec.Body)
+		}
+	}
+}
+
 func TestRelease_CompletenessGate(t *testing.T) {
 	h, _ := newHandler(t, true, 0)
 	router := campaignRoutes(h)
@@ -666,6 +703,7 @@ func TestRelease_CompletenessGate(t *testing.T) {
 	_ = json.Unmarshal(rec.Body.Bytes(), &enc)
 	base := encPath + "/" + enc.ID
 
+	closeOut(t, h, enc.ID)
 	rec = do(t, router, http.MethodPost, base+"/release", "")
 	if rec.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("release with gaps = %d, want 422; body=%s", rec.Code, rec.Body)
@@ -699,6 +737,7 @@ func TestRelease_CompleteContentReleasesWithoutForce(t *testing.T) {
 		`{"name":"Story","content":[{"id":"md","type":"markdown","markdown":{"body":"The reeds whisper."}}]}`)
 	var enc model.Encounter
 	_ = json.Unmarshal(rec.Body.Bytes(), &enc)
+	closeOut(t, h, enc.ID)
 	rec = do(t, router, http.MethodPost, encPath+"/"+enc.ID+"/release", "")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("release of complete content = %d, want 200; body=%s", rec.Code, rec.Body)
@@ -754,6 +793,7 @@ func TestRelease_PushesLootToPartyTreasure(t *testing.T) {
 	var enc model.Encounter
 	_ = json.Unmarshal(rec.Body.Bytes(), &enc)
 
+	closeOut(t, h, enc.ID)
 	rec = do(t, router, http.MethodPost, encPath+"/"+enc.ID+"/release", "")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("release = %d, want 200; body=%s", rec.Code, rec.Body)
@@ -790,6 +830,7 @@ func TestRelease_PushFailureStillSucceeds(t *testing.T) {
 	var enc model.Encounter
 	_ = json.Unmarshal(rec.Body.Bytes(), &enc)
 
+	closeOut(t, h, enc.ID)
 	rec = do(t, router, http.MethodPost, encPath+"/"+enc.ID+"/release", "")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("release with failing push = %d, want 200 (best-effort); body=%s", rec.Code, rec.Body)
@@ -817,6 +858,7 @@ func TestRetryReleasePush_ReplacesErrorWithReceipt(t *testing.T) {
 	rec := do(t, router, http.MethodPost, encPath, lootContent)
 	var enc model.Encounter
 	_ = json.Unmarshal(rec.Body.Bytes(), &enc)
+	closeOut(t, h, enc.ID)
 	do(t, router, http.MethodPost, encPath+"/"+enc.ID+"/release", "")
 
 	rel.err = nil
@@ -879,6 +921,7 @@ func TestRetryReleasePush_SurvivesCancelledRequest(t *testing.T) {
 	rec := do(t, router, http.MethodPost, encPath, lootContent)
 	var enc model.Encounter
 	_ = json.Unmarshal(rec.Body.Bytes(), &enc)
+	closeOut(t, h, enc.ID)
 	do(t, router, http.MethodPost, encPath+"/"+enc.ID+"/release", "")
 
 	rel.err = nil
@@ -921,6 +964,7 @@ func TestRelease_PushDisabledWhenNil(t *testing.T) {
 	var enc model.Encounter
 	_ = json.Unmarshal(rec.Body.Bytes(), &enc)
 
+	closeOut(t, h, enc.ID)
 	rec = do(t, router, http.MethodPost, encPath+"/"+enc.ID+"/release", "")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("release with push disabled = %d, want 200; body=%s", rec.Code, rec.Body)
